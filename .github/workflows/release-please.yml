@@ -3,8 +3,8 @@ on:
   push:
     branches: [main]
 
-# Least-privilege default for the workflow; the release-please job opts into
-# exactly the write scopes it needs and nothing more.
+# Least-privilege default for the workflow; each job opts into exactly the
+# write scopes it needs and nothing more.
 permissions:
   contents: read
 
@@ -14,13 +14,94 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      version: "${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}"
     steps:
       # release-please maintains a "release" PR with an updated CHANGELOG.md from
       # Conventional Commits. Merging it cuts the GitHub Release and the vX.Y.Z
-      # tag — and for a Go module that tag *is* the published artifact (go get
-      # consumes it directly), so there is no separate publish step.
+      # tag. For a Go module that tag *is* the library artifact (go get consumes
+      # it directly); the binaries below are an extra convenience for CLI users.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         id: release
         with:
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
+
+  release-binaries:
+    name: Binary (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Attach assets to the GitHub Release release-please created.
+      contents: write
+      # Keyless Sigstore signing of the provenance, via the run's OIDC identity.
+      id-token: write
+      # Record the build-provenance attestation for each archive.
+      attestations: write
+    env:
+      TAG: v${{ needs.release-please.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    steps:
+      - name: Check out the released tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Build the exact commit release-please tagged, not whatever is newest
+          # on main, so the binaries match the release.
+          ref: v${{ needs.release-please.outputs.version }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: stable
+
+      - name: Build and package
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          bin=permits
+          if [ "$GOOS" = windows ]; then
+            bin=permits.exe
+          fi
+          # -trimpath drops local filesystem paths; -s -w strips the symbol and
+          # DWARF tables so release binaries are smaller. CGO is off so every
+          # target is a static, dependency-free binary.
+          go build -trimpath -ldflags="-s -w" -o "$bin" ./cmd/permits
+          base="permits_${TAG}_${GOOS}_${GOARCH}"
+          if [ "$GOOS" = windows ]; then
+            archive="${base}.zip"
+            zip -q "$archive" "$bin"
+          else
+            archive="${base}.tar.gz"
+            tar -czf "$archive" "$bin"
+          fi
+          sha256sum "$archive" > "${archive}.sha256"
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+
+      # Binds the archive's digest to this repo/commit/workflow run so consumers
+      # can run `gh attestation verify <archive> --repo monetr/permits`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: ${{ env.ARCHIVE }}
+
+      - name: Attach to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # --clobber so re-running the job replaces assets instead of failing.
+        run: gh release upload "$TAG" "$ARCHIVE" "${ARCHIVE}.sha256" --clobber
