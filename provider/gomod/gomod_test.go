@@ -16,6 +16,8 @@ import (
 )
 
 func TestScannerDirect(t *testing.T) {
+	// Build a minimal but realistic module that has both a direct and an indirect require
+	// block. Only the direct requires should be returned by ScanDirect.
 	dir := t.TempDir()
 	gomod := `module example.com/app
 
@@ -42,11 +44,15 @@ require (
 	if err != nil {
 		t.Fatalf("ScanDirect: %v", err)
 	}
+
+	// Collapse the dependencies down to a sorted name@version slice so the comparison is
+	// stable regardless of the order the scanner returned them in.
 	var got []string
 	for _, d := range deps {
 		got = append(got, d.Name+"@"+d.Version)
 	}
 	sort.Strings(got)
+
 	want := []string{"github.com/direct/one@v1.2.3", "golang.org/x/mod@v0.17.0"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("ScanDirect got %v, want %v (indirect must be excluded)", got, want)
@@ -60,18 +66,26 @@ require (
 
 func TestScanner(t *testing.T) {
 	s := NewScanner()
+
+	// The scanner is keyed off of the go.sum file name, so it must claim that path before we
+	// can rely on the rest of the behaviour.
 	if !s.Detect("path/to/go.sum") {
 		t.Fatal("Detect should accept go.sum")
 	}
+
 	deps, err := s.Scan(context.Background(), "../../testdata/go.sum")
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Reduce to a sorted name@version slice so the assertion does not depend on map/iteration
+	// ordering inside the scanner.
 	var got []string
 	for _, d := range deps {
 		got = append(got, d.Name+"@"+d.Version)
 	}
 	sort.Strings(got)
+
 	want := []string{
 		"example.com/Mixed/Case@v1.0.0",
 		"golang.org/x/mod@v0.17.0",
@@ -89,7 +103,9 @@ func TestScanner(t *testing.T) {
 
 func TestFetcherCacheHit(t *testing.T) {
 	cache := t.TempDir()
-	// example.com/Mixed/Case escapes to example.com/!mixed/!case.
+
+	// example.com/Mixed/Case escapes to example.com/!mixed/!case. Seeding the on-disk module
+	// cache with a LICENSE here is what lets the fetcher resolve without any network access.
 	modDir := filepath.Join(cache, "example.com", "!mixed", "!case@v1.0.0")
 	if err := os.MkdirAll(modDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -98,8 +114,11 @@ func TestFetcherCacheHit(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The proxy URL is intentionally invalid so that any attempt to reach the network would
+	// fail; a successful Fetch therefore proves the cache hit was used.
 	f := NewFetcher(cache, "https://proxy.invalid", time.Second)
 	dep := model.Dependency{Ecosystem: model.EcosystemGo, Name: "example.com/Mixed/Case", Version: "v1.0.0"}
+
 	arts, err := f.Fetch(context.Background(), dep)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
@@ -111,6 +130,9 @@ func TestFetcherCacheHit(t *testing.T) {
 
 func makeModuleZip(t *testing.T) []byte {
 	t.Helper()
+
+	// A Go module zip stores files under the module@version prefix; the fetcher only cares
+	// about the LICENSE, but the go.mod is included to mirror a real proxy response.
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for name, body := range map[string]string{
@@ -124,12 +146,15 @@ func makeModuleZip(t *testing.T) []byte {
 		w.Write([]byte(body))
 	}
 	zw.Close()
+
 	return buf.Bytes()
 }
 
 func TestFetcherProxyFallback(t *testing.T) {
 	zipData := makeModuleZip(t)
 
+	// Only the exact zip URL is answered successfully; everything else 404s so an incorrect
+	// request path would surface as a test failure rather than a false positive.
 	httpmock.Activate()
 	defer httpmock.DeactivateAndReset()
 	const proxy = "https://proxy.test"
@@ -140,6 +165,7 @@ func TestFetcherProxyFallback(t *testing.T) {
 	// Empty cache dir so the fetcher falls back to the proxy.
 	f := NewFetcher(t.TempDir(), proxy, 5*time.Second)
 	dep := model.Dependency{Ecosystem: model.EcosystemGo, Name: "golang.org/x/mod", Version: "v0.17.0"}
+
 	arts, err := f.Fetch(context.Background(), dep)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
@@ -150,6 +176,9 @@ func TestFetcherProxyFallback(t *testing.T) {
 	if arts[0].Text != "x/mod BSD license text" {
 		t.Errorf("unexpected text: %q", arts[0].Text)
 	}
+
+	// The proxy must be hit exactly once; more than one call would imply a missing cache or a
+	// retry that should not happen on a successful fetch.
 	if n := httpmock.GetCallCountInfo()["GET "+zipURL]; n != 1 {
 		t.Errorf("proxy called %d times, want 1", n)
 	}

@@ -37,38 +37,45 @@ func NewScanner() *Scanner { return &Scanner{} }
 // Ecosystem implements provider.Source.
 func (s *Scanner) Ecosystem() model.Ecosystem { return model.EcosystemNPM }
 
-// Detect accepts files named like a pnpm lockfile, or any YAML file whose
-// content declares a pnpm "lockfileVersion".
+// Detect accepts files named like a pnpm lockfile, or any YAML file whose content declares a pnpm
+// "lockfileVersion".
 func (s *Scanner) Detect(p string) bool {
+	// A conventional pnpm-lock.* filename is accepted on its name alone; no need to read it.
 	base := strings.ToLower(path.Base(strings.ReplaceAll(p, `\`, "/")))
 	if strings.Contains(base, "pnpm-lock") {
 		return true
 	}
+
+	// Anything that is not a YAML file by extension cannot be a pnpm lockfile.
 	if !strings.HasSuffix(base, ".yaml") && !strings.HasSuffix(base, ".yml") {
 		return false
 	}
+
+	// Otherwise sniff the first chunk of the file for the lockfileVersion marker rather than
+	// parsing the whole document just to classify it.
 	f, err := os.Open(p)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
+
 	head := make([]byte, 256)
 	n, _ := f.Read(head)
+
 	return strings.Contains(string(head[:n]), "lockfileVersion")
 }
 
-// lockfile is a permissive view of pnpm-lock.yaml. Only the keys of the
-// packages/snapshots maps are needed, so their values decode into struct{}
-// rather than retaining the whole subtree. LockfileVersion is needed because
-// peer-dependency encoding differs by version (v5 uses "_peer", v6/v9 use
-// "(peer)") and v5 names contain "__" that must not be confused with "_peer".
+// lockfile is a permissive view of pnpm-lock.yaml. Only the keys of the packages/snapshots maps are
+// needed, so their values decode into struct{} rather than retaining the whole subtree.
+// LockfileVersion is needed because peer-dependency encoding differs by version (v5 uses "_peer",
+// v6/v9 use "(peer)") and v5 names contain "__" that must not be confused with "_peer".
 type lockfile struct {
 	LockfileVersion any                 `yaml:"lockfileVersion"`
 	Packages        map[string]struct{} `yaml:"packages"`
 	Snapshots       map[string]struct{} `yaml:"snapshots"`
 
-	// Direct dependencies. v9 nests them under importers (one per workspace);
-	// v5/v6 list them at the lockfile root.
+	// Direct dependencies. v9 nests them under importers (one per workspace); v5/v6 list them at
+	// the lockfile root.
 	Importers            map[string]importerDeps `yaml:"importers"`
 	Dependencies         map[string]directRef    `yaml:"dependencies"`
 	DevDependencies      map[string]directRef    `yaml:"devDependencies"`
@@ -81,36 +88,46 @@ type importerDeps struct {
 	OptionalDependencies map[string]directRef `yaml:"optionalDependencies"`
 }
 
-// directRef is a direct-dependency value, which is either a bare version string
-// (v5: `lodash: 4.17.21`) or an object (v6/v9: `{specifier, version}`).
+// directRef is a direct-dependency value, which is either a bare version string (v5:
+// `lodash: 4.17.21`) or an object (v6/v9: `{specifier, version}`).
 type directRef struct{ Version string }
 
 func (d *directRef) UnmarshalYAML(n *yaml.Node) error {
+	// v5 encodes the dependency as a bare scalar version, so the node value is the version
+	// directly.
 	if n.Kind == yaml.ScalarNode {
 		d.Version = n.Value
 		return nil
 	}
+
+	// v6/v9 encode it as a mapping; we only care about the resolved version field.
 	var obj struct {
 		Version string `yaml:"version"`
 	}
 	if err := n.Decode(&obj); err != nil {
 		return err
 	}
+
 	d.Version = obj.Version
+
 	return nil
 }
 
-// majorVersion extracts the integer major from a lockfileVersion that may be a
-// YAML number (5.4) or string ('6.0', '9.0'). Defaults to 9 (modern) when
-// absent or unparseable.
+// majorVersion extracts the integer major from a lockfileVersion that may be a YAML number (5.4) or
+// string ('6.0', '9.0'). Defaults to 9 (modern) when absent or unparseable.
 func majorVersion(v any) int {
+	// Normalize whatever YAML decoded (number or string) to text and keep only the leading major
+	// component before the first dot.
 	s := strings.TrimSpace(fmt.Sprint(v))
 	if i := strings.IndexByte(s, '.'); i >= 0 {
 		s = s[:i]
 	}
+
 	if n, err := strconv.Atoi(s); err == nil && n > 0 {
 		return n
 	}
+
+	// An absent or unparseable version is assumed to be the modern format.
 	return 9
 }
 
@@ -119,15 +136,17 @@ func loadLockfile(p string) (lockfile, error) {
 	if err != nil {
 		return lockfile{}, err
 	}
+
 	var lf lockfile
 	if err := yaml.Unmarshal(raw, &lf); err != nil {
 		return lockfile{}, fmt.Errorf("parsing %s: %w", p, err)
 	}
+
 	return lf, nil
 }
 
-// depCollector accumulates unique, valid npm dependencies. It rejects empty and
-// non-registry specifiers (link:/file:/workspace:/git/url contain ':').
+// depCollector accumulates unique, valid npm dependencies. It rejects empty and non-registry
+// specifiers (link:/file:/workspace:/git/url contain ':').
 type depCollector struct {
 	seen map[string]struct{}
 	deps []model.Dependency
@@ -138,13 +157,18 @@ func newDepCollector() *depCollector {
 }
 
 func (c *depCollector) add(name, version string) {
+	// Drop anything that is not a usable registry coordinate before it can enter the result set.
 	if name == "" || version == "" || strings.ContainsAny(version, ":") {
 		return
 	}
+
+	// Deduplicate on the fully-qualified name@version so the same package resolved through
+	// multiple lockfile sections is only emitted once.
 	id := name + "@" + version
 	if _, dup := c.seen[id]; dup {
 		return
 	}
+
 	c.seen[id] = struct{}{}
 	c.deps = append(c.deps, model.Dependency{
 		Ecosystem: model.EcosystemNPM,
@@ -159,8 +183,13 @@ func (s *Scanner) Scan(_ context.Context, p string) ([]model.Dependency, error) 
 	if err != nil {
 		return nil, err
 	}
+
+	// Key parsing is version-sensitive, so resolve the lockfile major once up front.
 	major := majorVersion(lf.LockfileVersion)
 	c := newDepCollector()
+
+	// Both the packages and snapshots maps key every resolved package (including transitive ones)
+	// by its pnpm coordinate; normalize each key and let the collector dedupe.
 	for _, keys := range []map[string]struct{}{lf.Packages, lf.Snapshots} {
 		for k := range keys {
 			if name, version, ok := normalizeKey(k, major); ok {
@@ -168,53 +197,64 @@ func (s *Scanner) Scan(_ context.Context, p string) ([]model.Dependency, error) 
 			}
 		}
 	}
+
 	return c.deps, nil
 }
 
-// ScanDirect parses only direct (top-level) dependencies, implementing
-// provider.DirectScanner. It reads pnpm's importers (v9) and the lockfile-root
-// dependency maps (v5/v6); transitive packages/snapshots are ignored.
+// ScanDirect parses only direct (top-level) dependencies, implementing provider.DirectScanner. It
+// reads pnpm's importers (v9) and the lockfile-root dependency maps (v5/v6); transitive
+// packages/snapshots are ignored.
 func (s *Scanner) ScanDirect(_ context.Context, p string) ([]model.Dependency, error) {
 	lf, err := loadLockfile(p)
 	if err != nil {
 		return nil, err
 	}
+
 	c := newDepCollector()
+
+	// addAll feeds one dependency map into the collector, stripping the v6/v9 parenthesized peer
+	// suffix so the recorded version is the plain resolved version.
 	addAll := func(m map[string]directRef) {
 		for name, ref := range m {
 			version := ref.Version
 			if i := strings.IndexByte(version, '('); i >= 0 {
 				version = version[:i] // strip v6/v9 peer suffix
 			}
+
 			c.add(name, strings.TrimSpace(version))
 		}
 	}
-	for _, imp := range lf.Importers { // v9 (one entry per workspace)
+
+	// v9 nests the direct dependencies under importers, with one entry per workspace.
+	for _, imp := range lf.Importers {
 		addAll(imp.Dependencies)
 		addAll(imp.DevDependencies)
 		addAll(imp.OptionalDependencies)
 	}
+
 	// v5/v6 keep direct deps at the lockfile root.
 	addAll(lf.Dependencies)
 	addAll(lf.DevDependencies)
 	addAll(lf.OptionalDependencies)
+
 	return c.deps, nil
 }
 
-// normalizeKey converts a pnpm package/snapshot key into (name, version).
-// Peer-dependency encoding is version-specific:
+// normalizeKey converts a pnpm package/snapshot key into (name, version). Peer-dependency encoding
+// is version-specific:
 //
 //	v5:  /lodash/4.17.21   /@babel/core/7.0.0   /react-dom/16.8.6_react@16.8.6
 //	v6:  /lodash@4.17.21   /@babel/core@7.0.0(react@18)
 //	v9:  lodash@4.17.21    @babel/core@7.0.0    @types/babel__core@7.1.0(...)
 //
-// In v5 the name/version separator is "/" and the peer suffix is "_peer"; the
-// name itself may contain "__" (e.g. @types/babel__core), so the peer suffix is
-// only stripped from the version (last path segment), never the whole key. In
-// v6/v9 the separator is the last "@" and peers are parenthesized; "_" is never
-// a separator there. Non-registry specifiers (link:/file:/git/url) are
+// In v5 the name/version separator is "/" and the peer suffix is "_peer"; the name itself may
+// contain "__" (e.g. @types/babel__core), so the peer suffix is only stripped from the version
+// (last path segment), never the whole key. In v6/v9 the separator is the last "@" and peers are
+// parenthesized; "_" is never a separator there. Non-registry specifiers (link:/file:/git/url) are
 // rejected.
 func normalizeKey(key string, major int) (name, version string, ok bool) {
+	// pnpm prefixes v5/v6 keys with a leading slash; trim it (and surrounding space) so the
+	// version-specific parsing below sees a clean coordinate.
 	k := strings.TrimSpace(key)
 	k = strings.TrimPrefix(k, "/")
 	if k == "" {
@@ -227,6 +267,7 @@ func normalizeKey(key string, major int) (name, version string, ok bool) {
 		if slash <= 0 {
 			return "", "", false
 		}
+
 		name, version = k[:slash], k[slash+1:]
 		if i := strings.IndexByte(version, '_'); i >= 0 {
 			version = version[:i]
@@ -236,10 +277,12 @@ func normalizeKey(key string, major int) (name, version string, ok bool) {
 		if i := strings.IndexByte(k, '('); i >= 0 {
 			k = k[:i]
 		}
+
 		at := strings.LastIndexByte(k, '@')
 		if at <= 0 {
 			return "", "", false
 		}
+
 		name, version = k[:at], k[at+1:]
 	}
 
@@ -248,20 +291,22 @@ func normalizeKey(key string, major int) (name, version string, ok bool) {
 	if name == "" || version == "" {
 		return "", "", false
 	}
+
 	// Reject non-registry specifiers (link:, file:, workspace:, http(s):, git:).
 	if strings.ContainsAny(version, ":") {
 		return "", "", false
 	}
+
 	return name, version, true
 }
 
-// Fetcher resolves license text from a local node_modules tree when available,
-// falling back to the npm registry tarball.
+// Fetcher resolves license text from a local node_modules tree when available, falling back to the
+// npm registry tarball.
 type Fetcher struct {
 	Registry string
-	// ModulesDirs are node_modules roots checked before the registry. Both the
-	// pnpm virtual store (<root>/.pnpm/<pkg>@<ver>/node_modules/<name>) and the
-	// flat layout (<root>/<name>) are supported.
+	// ModulesDirs are node_modules roots checked before the registry. Both the pnpm virtual store
+	// (<root>/.pnpm/<pkg>@<ver>/node_modules/<name>) and the flat layout (<root>/<name>) are
+	// supported.
 	ModulesDirs []string
 	client      *httpx.Client
 
@@ -269,13 +314,13 @@ type Fetcher struct {
 	cache map[string][]model.LicenseArtifact
 }
 
-// NewFetcher returns a [Fetcher]. registry defaults to the public npm registry;
-// modulesDirs are local node_modules roots checked before the registry;
-// timeout is the per-request timeout.
+// NewFetcher returns a [Fetcher]. registry defaults to the public npm registry; modulesDirs are
+// local node_modules roots checked before the registry; timeout is the per-request timeout.
 func NewFetcher(registry string, modulesDirs []string, timeout time.Duration) *Fetcher {
 	if registry == "" {
 		registry = defaultRegistry
 	}
+
 	return &Fetcher{
 		Registry:    strings.TrimRight(registry, "/"),
 		ModulesDirs: modulesDirs,
@@ -297,10 +342,13 @@ type registryDoc struct {
 	} `json:"versions"`
 }
 
-// Fetch downloads the package metadata and tarball and extracts every license
-// file. An empty result with nil error means no license file was present.
+// Fetch downloads the package metadata and tarball and extracts every license file. An empty
+// result with nil error means no license file was present.
 func (f *Fetcher) Fetch(ctx context.Context, dep model.Dependency) ([]model.LicenseArtifact, error) {
 	id := dep.Name + "@" + dep.Version
+
+	// Serve a previously resolved result straight from the cache so repeated dependencies do not
+	// re-hit the disk or the network.
 	f.mu.Lock()
 	if cached, ok := f.cache[id]; ok {
 		f.mu.Unlock()
@@ -308,8 +356,8 @@ func (f *Fetcher) Fetch(ctx context.Context, dep model.Dependency) ([]model.Lice
 	}
 	f.mu.Unlock()
 
-	// node_modules first: if the package is installed locally and contains a
-	// license file, use it and skip the network entirely.
+	// node_modules first: if the package is installed locally and contains a license file, use it
+	// and skip the network entirely.
 	if local := f.fromNodeModules(dep); local != nil {
 		f.mu.Lock()
 		f.cache[id] = local
@@ -317,15 +365,20 @@ func (f *Fetcher) Fetch(ctx context.Context, dep model.Dependency) ([]model.Lice
 		return local, nil
 	}
 
+	// Otherwise fetch the package document from the registry and decode it.
 	metaURL := f.Registry + "/" + escapePackageName(dep.Name)
 	body, err := f.client.GetBytes(ctx, metaURL)
 	if err != nil {
 		return nil, fmt.Errorf("npm metadata %s: %w", id, err)
 	}
+
 	var doc registryDoc
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return nil, fmt.Errorf("npm metadata %s: %w", id, err)
 	}
+
+	// The requested version must exist and advertise a tarball before there is anything to
+	// download.
 	v, ok := doc.Versions[dep.Version]
 	if !ok {
 		return nil, fmt.Errorf("npm metadata %s: version not found", id)
@@ -334,11 +387,15 @@ func (f *Fetcher) Fetch(ctx context.Context, dep model.Dependency) ([]model.Lice
 		return nil, fmt.Errorf("npm metadata %s: no tarball", id)
 	}
 
+	// Download the tarball and extract every license file it contains, attaching the declared
+	// license from the registry metadata to each artifact.
 	tgz, err := f.client.GetBytes(ctx, v.Dist.Tarball)
 	if err != nil {
 		return nil, fmt.Errorf("npm tarball %s: %w", id, err)
 	}
+
 	declared := declaredLicense(v.License, v.Licenses)
+
 	artifacts, err := extractTarball(tgz, dep, declared)
 	if err != nil {
 		return nil, fmt.Errorf("npm tarball %s: %w", id, err)
@@ -347,25 +404,30 @@ func (f *Fetcher) Fetch(ctx context.Context, dep model.Dependency) ([]model.Lice
 	f.mu.Lock()
 	f.cache[id] = artifacts
 	f.mu.Unlock()
+
 	return artifacts, nil
 }
 
-// escapePackageName encodes a package name for a registry URL path, encoding
-// the scope separator (@scope/name -> @scope%2Fname).
+// escapePackageName encodes a package name for a registry URL path, encoding the scope separator
+// (@scope/name -> @scope%2Fname).
 func escapePackageName(name string) string {
+	// Scoped packages must keep the leading "@" literal while the slash is percent-encoded, so
+	// they cannot go through url.PathEscape wholesale.
 	if strings.HasPrefix(name, "@") {
 		return strings.ReplaceAll(name, "/", "%2F")
 	}
+
 	return url.PathEscape(name)
 }
 
-// fromNodeModules looks for the installed package directory across the
-// configured node_modules roots and, if it contains a license file, returns the
-// artifacts read from disk. It returns nil (not an empty slice) when the
-// package is not found locally, so the caller falls back to the registry. A
-// locally installed package with no license file yields an empty, non-nil
-// slice (authoritative "no license"), matching the Go cache behaviour.
+// fromNodeModules looks for the installed package directory across the configured node_modules
+// roots and, if it contains a license file, returns the artifacts read from disk. It returns nil
+// (not an empty slice) when the package is not found locally, so the caller falls back to the
+// registry. A locally installed package with no license file yields an empty, non-nil slice
+// (authoritative "no license"), matching the Go cache behaviour.
 func (f *Fetcher) fromNodeModules(dep model.Dependency) []model.LicenseArtifact {
+	// Probe each configured root in order and return the first install whose directory could
+	// actually be read; a missing directory is skipped so later roots still get a chance.
 	for _, root := range f.ModulesDirs {
 		if dir := packageDir(root, dep); dir != "" {
 			arts := f.readPackageDir(dir, dep)
@@ -374,14 +436,15 @@ func (f *Fetcher) fromNodeModules(dep model.Dependency) []model.LicenseArtifact 
 			}
 		}
 	}
+
 	return nil
 }
 
-// packageDir returns the installed package directory for dep under a
-// node_modules root, checking the pnpm virtual store first, then the flat
-// layout. It returns "" if no directory exists.
+// packageDir returns the installed package directory for dep under a node_modules root, checking
+// the pnpm virtual store first, then the flat layout. It returns "" if no directory exists.
 func packageDir(root string, dep model.Dependency) string {
-	// pnpm virtual store: node_modules/.pnpm/<name+scope>@<ver>*/node_modules/<name>
+	// pnpm virtual store: node_modules/.pnpm/<name+scope>@<ver>*/node_modules/<name>. The store
+	// folder is version-pinned, so a glob match here already implies the right version.
 	escaped := strings.ReplaceAll(dep.Name, "/", "+")
 	pattern := filepath.Join(root, ".pnpm", escaped+"@"+dep.Version+"*", "node_modules", filepath.FromSlash(dep.Name))
 	if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
@@ -391,37 +454,48 @@ func packageDir(root string, dep model.Dependency) string {
 			}
 		}
 	}
-	// Flat layout: node_modules/<name> — only trust it if the version matches.
+
+	// Flat layout: node_modules/<name> — only trust it if the version matches (or package.json is
+	// absent/unreadable, in which case we optimistically accept it).
 	flat := filepath.Join(root, filepath.FromSlash(dep.Name))
 	if info, err := os.Stat(flat); err == nil && info.IsDir() {
 		if v := readPackageJSONVersion(flat); v == "" || v == dep.Version {
 			return flat
 		}
 	}
+
 	return ""
 }
 
-// readPackageDir reads every license file in dir. Returns a non-nil (possibly
-// empty) slice when dir exists, so a present-but-unlicensed local install is
-// authoritative.
+// readPackageDir reads every license file in dir. Returns a non-nil (possibly empty) slice when dir
+// exists, so a present-but-unlicensed local install is authoritative.
 func (f *Fetcher) readPackageDir(dir string, dep model.Dependency) []model.LicenseArtifact {
 	declared := readPackageJSONLicense(dir)
+
+	// A directory we cannot enumerate is treated as "not found" (nil) so the caller falls back to
+	// the registry rather than asserting an authoritative empty result.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
+
+	// Start from a non-nil empty slice: even with zero license files this signals an authoritative
+	// "installed but unlicensed" answer.
 	artifacts := []model.LicenseArtifact{}
 	for _, e := range entries {
 		if e.IsDir() || !license.IsLicenseFile(e.Name()) {
 			continue
 		}
+
 		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
 			continue
 		}
+
 		artifacts = append(artifacts,
 			model.NewLicenseArtifact(dep, declared, e.Name(), "npm-node-modules", data))
 	}
+
 	return artifacts
 }
 
@@ -436,15 +510,20 @@ func parsePackageJSON(dir string) (packageJSON, bool) {
 	if err != nil {
 		return packageJSON{}, false
 	}
+
+	// A package.json that fails to parse is reported as absent rather than as an error so callers
+	// can degrade gracefully.
 	var pj packageJSON
 	if json.Unmarshal(data, &pj) != nil {
 		return packageJSON{}, false
 	}
+
 	return pj, true
 }
 
 func readPackageJSONVersion(dir string) string {
 	pj, _ := parsePackageJSON(dir)
+
 	return pj.Version
 }
 
@@ -453,6 +532,7 @@ func readPackageJSONLicense(dir string) string {
 	if !ok {
 		return ""
 	}
+
 	return declaredLicense(pj.License, pj.Licenses)
 }
 
@@ -464,8 +544,11 @@ func extractTarball(tgz []byte, dep model.Dependency, declared string) ([]model.
 	defer gz.Close()
 
 	tr := tar.NewReader(gz)
+
 	var artifacts []model.LicenseArtifact
 	for {
+		// Any read error (including io.EOF at the end of the archive) ends the scan; partial
+		// archives simply yield whatever was collected so far.
 		hdr, err := tr.Next()
 		if err != nil {
 			break
@@ -473,24 +556,32 @@ func extractTarball(tgz []byte, dep model.Dependency, declared string) ([]model.
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
+
 		// npm tarballs nest everything under "package/".
 		rel := strings.TrimPrefix(path.Clean(hdr.Name), "package/")
 		if !license.IsLicenseFile(rel) {
 			continue
 		}
+
+		// Cap each file at MaxLicenseBytes so a hostile or oversized archive cannot exhaust
+		// memory.
 		data, err := io.ReadAll(io.LimitReader(tr, model.MaxLicenseBytes))
 		if err != nil {
 			return nil, err
 		}
+
 		artifacts = append(artifacts,
 			model.NewLicenseArtifact(dep, declared, path.Base(rel), "npm-tarball", data))
 	}
+
 	return artifacts, nil
 }
 
-// declaredLicense extracts an SPDX-ish string from the npm "license" (string or
-// {type}) or legacy "licenses" ([]{type}) fields.
+// declaredLicense extracts an SPDX-ish string from the npm "license" (string or {type}) or legacy
+// "licenses" ([]{type}) fields.
 func declaredLicense(lic, lics any) string {
+	// The modern "license" field is either a bare SPDX string or a {type: ...} object; handle both
+	// shapes before considering the legacy field.
 	switch v := lic.(type) {
 	case string:
 		return v
@@ -499,6 +590,9 @@ func declaredLicense(lic, lics any) string {
 			return t
 		}
 	}
+
+	// Fall back to the deprecated "licenses" array, joining each entry's type with "OR" to form a
+	// best-effort SPDX expression.
 	if arr, ok := lics.([]any); ok {
 		var parts []string
 		for _, e := range arr {
@@ -508,7 +602,9 @@ func declaredLicense(lic, lics any) string {
 				}
 			}
 		}
+
 		return strings.Join(parts, " OR ")
 	}
+
 	return ""
 }

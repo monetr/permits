@@ -21,6 +21,9 @@ import (
 type stringSlice []string
 
 func (s *stringSlice) String() string { return strings.Join(*s, ",") }
+
+// Set appends another value, allowing the same flag to be supplied more than once instead of
+// overwriting the previous occurrence.
 func (s *stringSlice) Set(v string) error {
 	*s = append(*s, v)
 	return nil
@@ -30,7 +33,11 @@ func main() {
 	os.Exit(run())
 }
 
+// run holds the real entrypoint so that it can return an exit code instead of calling os.Exit
+// directly; this keeps deferred cleanup working and makes the flow testable.
 func run() int {
+	// Define the command-line surface. The lockfile and node_modules flags are repeatable so a
+	// single invocation can cover a polyglot repository.
 	var pnpmLocks, goSums, nodeModules stringSlice
 	flag.Var(&pnpmLocks, "pnpm-lock", "path to a pnpm-lock.yaml (repeatable)")
 	flag.Var(&goSums, "go-sum", "path to a go.sum (repeatable)")
@@ -45,6 +52,8 @@ func run() int {
 	verbose := flag.Bool("v", false, "verbose progress logging")
 	flag.Parse()
 
+	// At least one lockfile is mandatory; with nothing to scan there is no work to do, so fail
+	// fast with usage rather than producing an empty result.
 	files := append([]string(pnpmLocks), []string(goSums)...)
 	if len(files) == 0 {
 		fmt.Fprintln(os.Stderr, "permits: at least one -pnpm-lock or -go-sum is required")
@@ -52,7 +61,9 @@ func run() int {
 		return 2
 	}
 
-	// Default each pnpm-lock's sibling node_modules as a local source.
+	// Default each pnpm-lock's sibling node_modules as a local source. Resolving from an existing
+	// install is faster and more reliable than the registry, and the seen set keeps shared
+	// node_modules roots from being probed twice.
 	nmDirs := []string(nodeModules)
 	if len(nmDirs) == 0 {
 		seen := map[string]struct{}{}
@@ -68,6 +79,8 @@ func run() int {
 		}
 	}
 
+	// Translate the parsed flags into library options. Verbose logging is opt-in and routed to
+	// stderr so it never contaminates the machine-readable summary on stdout.
 	opts := permits.Options{
 		Concurrency:     *concurrency,
 		Timeout:         *timeout,
@@ -82,12 +95,15 @@ func run() int {
 		opts.Logf = logger.Printf
 	}
 
+	// Run the collection and persist the result. Both the collection and the write are fatal: a
+	// failure here means we have nothing trustworthy to report.
 	c := permits.NewCollector(permits.DefaultRegistry(opts), opts)
 	summary, _, err := c.Collect(context.Background(), files...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "permits: %v\n", err)
 		return 2
 	}
+
 	if err := output.Write(*out, summary); err != nil {
 		fmt.Fprintf(os.Stderr, "permits: writing output: %v\n", err)
 		return 2
@@ -97,8 +113,11 @@ func run() int {
 	fmt.Printf("permits: %d deps, %d resolved, %d no-license, %d failed -> %s\n",
 		st.Total, st.Resolved, st.NoLicenseFound, st.Failed, *out)
 
+	// A hard failure always exits non-zero; missing licenses only do so under -strict, letting CI
+	// choose whether an unresolved license should break the build.
 	if st.Failed > 0 || (*strict && st.NoLicenseFound > 0) {
 		return 1
 	}
+
 	return 0
 }

@@ -17,17 +17,23 @@ import (
 	"github.com/monetr/permits/model"
 )
 
+// depSet reduces a slice of dependencies down to a sorted, comparable list of name@version
+// strings so assertions do not depend on the order the scanner produced.
 func depSet(deps []model.Dependency) []string {
 	var out []string
 	for _, d := range deps {
 		out = append(out, d.Name+"@"+d.Version)
 	}
 	sort.Strings(out)
+
 	return out
 }
 
 func TestScannerLockfileVersions(t *testing.T) {
 	want := []string{"@babel/core@7.0.0", "lodash@4.17.21", "react-dom@16.8.6"}
+
+	// The same set of dependencies must be discovered regardless of which pnpm lockfile
+	// version produced the file, so every fixture is run through the same expectations.
 	for _, f := range []string{
 		"../../testdata/pnpm-lock.v5.yaml",
 		"../../testdata/pnpm-lock.v6.yaml",
@@ -37,10 +43,12 @@ func TestScannerLockfileVersions(t *testing.T) {
 		if !s.Detect("pnpm-lock.yaml") {
 			t.Fatal("Detect should accept pnpm-lock.yaml")
 		}
+
 		deps, err := s.Scan(context.Background(), f)
 		if err != nil {
 			t.Fatalf("Scan(%s): %v", f, err)
 		}
+
 		got := depSet(deps)
 		if fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Errorf("%s: got %v want %v", f, got, want)
@@ -52,6 +60,7 @@ func TestScannerDirect(t *testing.T) {
 	// In every fixture lodash is the only direct dependency; @babel/core and
 	// react-dom are transitive-only, and the v9 link: dep must be excluded.
 	want := []string{"lodash@4.17.21"}
+
 	for _, f := range []string{
 		"../../testdata/pnpm-lock.v5.yaml",
 		"../../testdata/pnpm-lock.v6.yaml",
@@ -61,6 +70,7 @@ func TestScannerDirect(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ScanDirect(%s): %v", f, err)
 		}
+
 		if got := depSet(deps); fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Errorf("%s: got %v want %v", f, got, want)
 		}
@@ -102,6 +112,9 @@ func TestNormalizeKey(t *testing.T) {
 
 func makeTarball(t *testing.T, files map[string]string) []byte {
 	t.Helper()
+
+	// npm tarballs nest every entry under a top-level "package/" directory, so the helper
+	// mirrors that layout to produce a fixture the fetcher will accept.
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
@@ -119,6 +132,7 @@ func makeTarball(t *testing.T, files map[string]string) []byte {
 	}
 	tw.Close()
 	gz.Close()
+
 	return buf.Bytes()
 }
 
@@ -155,6 +169,8 @@ func TestFetcherNodeModulesFirst(t *testing.T) {
 
 	f := NewFetcher("https://registry.test", []string{root}, time.Second)
 
+	// The scoped package resolves entirely from the pnpm virtual store, including its
+	// declared license, so no registry call should happen here.
 	babel := model.Dependency{Ecosystem: model.EcosystemNPM, Name: "@babel/core", Version: "7.0.0"}
 	arts, err := f.Fetch(context.Background(), babel)
 	if err != nil {
@@ -165,6 +181,8 @@ func TestFetcherNodeModulesFirst(t *testing.T) {
 		t.Fatalf("unexpected @babel/core artifacts: %+v", arts)
 	}
 
+	// The unscoped package resolves from the flat node_modules layout, again without touching
+	// the registry.
 	lodash := model.Dependency{Ecosystem: model.EcosystemNPM, Name: "lodash", Version: "4.17.21"}
 	arts, err = f.Fetch(context.Background(), lodash)
 	if err != nil {
@@ -197,6 +215,8 @@ func TestFetcher(t *testing.T) {
 	const registry = "https://registry.test"
 	const tarballURL = registry + "/lodash/-/lodash-4.17.21.tgz"
 
+	// Stub the metadata endpoint so the fetcher learns the declared license and tarball URL,
+	// then stub the tarball itself with the gzip archive built above.
 	httpmock.Activate()
 	defer httpmock.DeactivateAndReset()
 	httpmock.RegisterResponder("GET", registry+"/lodash", httpmock.NewJsonResponderOrPanic(200, map[string]any{
@@ -211,6 +231,7 @@ func TestFetcher(t *testing.T) {
 
 	f := NewFetcher(registry, nil, 5*time.Second)
 	dep := model.Dependency{Ecosystem: model.EcosystemNPM, Name: "lodash", Version: "4.17.21"}
+
 	arts, err := f.Fetch(context.Background(), dep)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
@@ -218,6 +239,9 @@ func TestFetcher(t *testing.T) {
 	if len(arts) != 1 {
 		t.Fatalf("got %d artifacts, want 1", len(arts))
 	}
+
+	// The LICENSE entry (not the README) must be selected, carry the registry-declared
+	// license, and be hashed so downstream consumers can dedupe on content.
 	a := arts[0]
 	if a.FileName != "LICENSE" || a.DeclaredLicense != "MIT" || a.Source != "npm-tarball" {
 		t.Errorf("unexpected artifact: %+v", a)

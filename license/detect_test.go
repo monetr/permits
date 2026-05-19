@@ -26,23 +26,31 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.`
 
 func TestDetect(t *testing.T) {
+	// The happy path: a verbatim MIT license must classify as exactly MIT.
 	got := Detect(mitText)
 	if len(got) != 1 || got[0] != "MIT" {
 		t.Fatalf("Detect(MIT) = %v, want [MIT]", got)
 	}
 
+	// Empty input is not a license, so detection must come back empty rather than
+	// guessing.
 	if got := Detect(""); len(got) != 0 {
 		t.Errorf("Detect(\"\") = %v, want []", got)
 	}
 
+	// Arbitrary prose must not be mistaken for a license; a false positive here
+	// would attach a bogus SPDX id to a dependency.
 	if got := Detect("this is not a license at all, just prose"); len(got) != 0 {
 		t.Errorf("Detect(non-license) = %v, want []", got)
 	}
 }
 
 func TestDetectDualLicense(t *testing.T) {
-	// A single file containing both MIT and Apache-2.0 (the yaml.v3 shape).
+	// A single file containing both MIT and Apache-2.0 (the yaml.v3 shape). Both
+	// identifiers must be reported because suppressing either one would
+	// misrepresent the terms the dependency is actually offered under.
 	dual := mitText + "\n\n" + apacheText
+
 	got := Detect(dual)
 	joined := strings.Join(got, ",")
 	if !strings.Contains(joined, "MIT") || !strings.Contains(joined, "Apache-2.0") {
@@ -50,6 +58,9 @@ func TestDetectDualLicense(t *testing.T) {
 	}
 }
 
+// eq reports whether two string slices are equal element for element. The
+// detection results are order sensitive, so this deliberately does not sort
+// before comparing.
 func eq(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -59,12 +70,15 @@ func eq(a, b []string) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
 func TestDetectFairSource(t *testing.T) {
-	// FSL-1.1-MIT embeds the full MIT text as its "future license"; FSL must
-	// win and MIT must be suppressed (the current grant is FSL, not MIT).
+	// FSL-1.1-MIT embeds the full MIT text as its "future license"; FSL must win
+	// and MIT must be suppressed (the current grant is FSL, not MIT). Reporting
+	// MIT here would let a consumer believe they had MIT rights today, which is
+	// exactly the misread the fair-source detection exists to prevent.
 	fslMIT := "Functional Source License, Version 1.1, MIT Future License\n\n" +
 		"## Abbreviation\n\nFSL-1.1-MIT\n\n## Notice\n\nCopyright 2024 monetr\n\n" +
 		"# MIT Future License\n\n" + mitText
@@ -72,22 +86,28 @@ func TestDetectFairSource(t *testing.T) {
 		t.Errorf("Detect(FSL-1.1-MIT) = %v, want [FSL-1.1-MIT] (MIT must be suppressed)", got)
 	}
 
+	// The Apache-future variant is the same idea: the embedded Apache text must
+	// not leak through past the FSL grant.
 	fslAL := "Functional Source License, Version 1.1, Apache 2.0 Future License\n\nFSL-1.1-ALv2\n" + apacheText
 	if got := Detect(fslAL); !eq(got, []string{"FSL-1.1-ALv2"}) {
 		t.Errorf("Detect(FSL-1.1-ALv2) = %v, want [FSL-1.1-ALv2]", got)
 	}
 
+	// BUSL is recognized from its title plus the Licensor/Licensed Work header
+	// that every Business Source License carries.
 	busl := "Business Source License 1.1\n\nLicensor: monetr LLC\nLicensed Work: monetr\n"
 	if got := Detect(busl); !eq(got, []string{"BUSL-1.1"}) {
 		t.Errorf("Detect(BUSL) = %v, want [BUSL-1.1]", got)
 	}
 
+	// The Elastic License is likewise keyed off its title and acceptance clause.
 	elastic := "Elastic License 2.0\n\nAcceptance ... By using the software, you agree ...\n"
 	if got := Detect(elastic); !eq(got, []string{"Elastic-2.0"}) {
 		t.Errorf("Detect(Elastic) = %v, want [Elastic-2.0]", got)
 	}
 
-	// Regression: a plain MIT (no FSL markers) must still classify as MIT.
+	// Regression: a plain MIT (no FSL markers) must still classify as MIT. The
+	// suppression above must only fire when the fair-source markers are present.
 	if got := Detect(mitText); !eq(got, []string{"MIT"}) {
 		t.Errorf("Detect(plain MIT) = %v, want [MIT]", got)
 	}
