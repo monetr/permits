@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/monetr/permits/model"
@@ -18,6 +19,11 @@ func Write(dir string, summary model.Summary) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+
+	// Order summary.json the same way the on-disk tree lists: by the path segments
+	// (<ecosystem>/<name>/<version>) and then artifact filename. Sorting before the write
+	// loop also makes the collision suffixes (-2, -3) deterministic in folder order.
+	sortByFolder(summary.Dependencies)
 
 	// Track filenames already used within each dependency directory so that collisions (same
 	// SPDX id, or repeated original names) get a numeric suffix instead of overwriting each other.
@@ -45,6 +51,29 @@ func Write(dir string, summary model.Summary) error {
 	enc.SetIndent("", "  ")
 
 	return enc.Encode(summary)
+}
+
+// sortByFolder orders deps, and the artifacts within each dep, by the path the tree on disk
+// uses: <ecosystem>/<name>/<version> then the artifact's file stem. nameToPath is compared
+// (not the raw name) so scoped/Go-module names sort by their real directory segments.
+func sortByFolder(deps []model.DepResult) {
+	sort.SliceStable(deps, func(i, j int) bool {
+		a, b := deps[i].Dependency, deps[j].Dependency
+		if a.Ecosystem != b.Ecosystem {
+			return a.Ecosystem < b.Ecosystem
+		}
+		if pa, pb := nameToPath(a.Name), nameToPath(b.Name); pa != pb {
+			return pa < pb
+		}
+		return a.Version < b.Version
+	})
+
+	for i := range deps {
+		arts := deps[i].Artifacts
+		sort.SliceStable(arts, func(x, y int) bool {
+			return baseName(arts[x]) < baseName(arts[y])
+		})
+	}
 }
 
 // writeArtifact writes one Markdown file and returns its slash-separated path relative to dir (the
