@@ -1,0 +1,9 @@
+/permits
+/dist/
+/licenses/
+example/node_modules/
+example/licenses/
+*.test
+*.out
+.DS_Store
+.claude/

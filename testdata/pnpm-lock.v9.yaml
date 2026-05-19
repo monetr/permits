@@ -1,0 +1,25 @@
+lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      lodash:
+        specifier: ^4.17.21
+        version: 4.17.21
+      local-pkg:
+        specifier: link:../local
+        version: link:../local
+
+packages:
+  lodash@4.17.21:
+    resolution: {integrity: sha512-fake}
+  '@babel/core@7.0.0':
+    resolution: {integrity: sha512-fake}
+
+snapshots:
+  lodash@4.17.21: {}
+  '@babel/core@7.0.0': {}
+  react-dom@16.8.6(react@16.8.6):
+    dependencies:
+      react: 16.8.6
+  local-pkg@link:../local: {}

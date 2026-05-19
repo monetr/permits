@@ -1,0 +1,60 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly re-scan (Mondays 06:17 UTC) so newly published CodeQL queries
+    # and CVE patterns are applied even when the code hasn't changed.
+    - cron: "17 6 * * 1"
+
+# Least-privilege default for the workflow; the analyze job below opts into
+# exactly the extra scopes CodeQL needs and nothing more.
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Upload SARIF results to the repository's code-scanning dashboard.
+      security-events: write
+      # Check out the repository.
+      contents: read
+      # Read workflow run metadata (required only for private repositories).
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@f25eda876ebb741d872b63b9f2c6dfdd77f14b83 # v4.35.5
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # Go is compiled: autobuild runs the standard `go build` so the
+      # extractor observes the full call graph.
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@f25eda876ebb741d872b63b9f2c6dfdd77f14b83 # v4.35.5
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@f25eda876ebb741d872b63b9f2c6dfdd77f14b83 # v4.35.5
+        with:
+          category: "/language:${{ matrix.language }}"
