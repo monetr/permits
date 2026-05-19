@@ -16,7 +16,9 @@ jobs:
       pull-requests: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
-      version: "${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}"
+      # Full tag from release-please, e.g. v1.2.0 or v1.0.0-rc.1. Reconstructing
+      # it from major.minor.patch drops any prerelease suffix.
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       # release-please maintains a "release" PR with an updated CHANGELOG.md from
       # Conventional Commits. Merging it cuts the GitHub Release and the vX.Y.Z
@@ -42,7 +44,7 @@ jobs:
       # Record the build-provenance attestation for each archive.
       attestations: write
     env:
-      TAG: v${{ needs.release-please.outputs.version }}
+      TAG: ${{ needs.release-please.outputs.tag_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -59,7 +61,7 @@ jobs:
         with:
           # Build the exact commit release-please tagged, not whatever is newest
           # on main, so the binaries match the release.
-          ref: v${{ needs.release-please.outputs.version }}
+          ref: ${{ needs.release-please.outputs.tag_name }}
           persist-credentials: false
 
       - name: Set up Go
