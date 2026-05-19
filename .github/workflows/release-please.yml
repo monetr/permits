@@ -16,14 +16,18 @@ jobs:
       pull-requests: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
-      # Full tag from release-please, e.g. v1.2.0 or v1.0.0-rc.1. Reconstructing
-      # it from major.minor.patch drops any prerelease suffix.
+      # Full tag, e.g. v1.2.0 or v1.0.0-rc.1. Reconstructing it from
+      # major.minor.patch drops any prerelease suffix.
       tag_name: ${{ steps.release.outputs.tag_name }}
+      # Released commit. The git tag does not exist until the draft release is
+      # published, so downstream jobs build from this SHA instead of the tag.
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       # release-please maintains a "release" PR with an updated CHANGELOG.md from
-      # Conventional Commits. Merging it cuts the GitHub Release and the vX.Y.Z
-      # tag. For a Go module that tag *is* the library artifact (go get consumes
-      # it directly); the binaries below are an extra convenience for CLI users.
+      # Conventional Commits. draft:true in the config means the release opens as
+      # a draft so the jobs below can attach binaries; publish-release then flips
+      # it live. GitHub freezes a release and its assets together at publish, so
+      # assets cannot be added to an already-published (immutable) release.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         id: release
         with:
@@ -56,12 +60,12 @@ jobs:
           - { goos: windows, goarch: amd64 }
           - { goos: windows, goarch: arm64 }
     steps:
-      - name: Check out the released tag
+      - name: Check out the released commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # Build the exact commit release-please tagged, not whatever is newest
-          # on main, so the binaries match the release.
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          # Build the released commit by SHA: the git tag does not exist yet
+          # while the release is still a draft.
+          ref: ${{ needs.release-please.outputs.sha }}
           persist-credentials: false
 
       - name: Set up Go
@@ -102,8 +106,36 @@ jobs:
         with:
           subject-path: ${{ env.ARCHIVE }}
 
-      - name: Attach to the GitHub Release
+      - name: Attach to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         # --clobber so re-running the job replaces assets instead of failing.
         run: gh release upload "$TAG" "$ARCHIVE" "${ARCHIVE}.sha256" --clobber
+
+  publish-release:
+    name: Publish release
+    needs: [release-please, release-binaries]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # Flip the draft release to published.
+      contents: write
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+      # gh needs a repo context; this job has no checkout to infer one from.
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # Runs only after every binary job succeeded, so an incomplete release is
+      # never published — it stays a draft to investigate. Publishing freezes
+      # the release and its assets together (immutable). A SemVer-prerelease tag
+      # (e.g. v1.0.0-rc.1) is published as a prerelease and never marked Latest;
+      # a final vX.Y.Z is the inverse.
+      - name: Publish the GitHub Release
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            *-*) gh release edit "$TAG" --draft=false --prerelease --latest=false ;;
+            *)   gh release edit "$TAG" --draft=false --prerelease=false --latest ;;
+          esac
