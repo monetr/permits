@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.0-rc.3](https://github.com/monetr/permits/compare/v1.0.0-rc.2...v1.0.0-rc.3) (2026-05-19)
+
+
+### Bug Fixes
+
+* **build:** Fixing tests on windows ([4dd5c8c](https://github.com/monetr/permits/commit/4dd5c8c1d89c9aeb8406071515b4f6ea8a6e11aa))
+* **build:** More work on fixing the release pipeline ([91a58cc](https://github.com/monetr/permits/commit/91a58cc0acd6d4e37ffcb39c2bc2f27afe68b1cc))
+* **build:** No more macOS amd64 ([f41e6bb](https://github.com/monetr/permits/commit/f41e6bb5fb3f770b8e6a77c657641dd7495e4810))
+
+
+### Build Automation
+
+* Adding code coverage ([9660049](https://github.com/monetr/permits/commit/96600491df45a9a47f5c7430a66991d267fde9b5))
+* Test everywhere ([2ac4ad8](https://github.com/monetr/permits/commit/2ac4ad848fc4ef7daa4fd1d42020448feca82aa1))
+
 ## [1.0.0-rc.2](https://github.com/monetr/permits/compare/v1.0.0-rc.1...v1.0.0-rc.2) (2026-05-19)
 
 
