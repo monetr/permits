@@ -1,0 +1,26 @@
+name: Release
+on:
+  push:
+    branches: [main]
+
+# Least-privilege default for the workflow; the release-please job opts into
+# exactly the write scopes it needs and nothing more.
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # release-please maintains a "release" PR with an updated CHANGELOG.md from
+      # Conventional Commits. Merging it cuts the GitHub Release and the vX.Y.Z
+      # tag — and for a Go module that tag *is* the published artifact (go get
+      # consumes it directly), so there is no separate publish step.
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
