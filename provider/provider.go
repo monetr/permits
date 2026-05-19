@@ -63,8 +63,6 @@ func NewRegistry() *Registry {
 // supplies one half, though both are required for that ecosystem to be usable end to end. A later
 // registration for the same ecosystem replaces the previous [Fetcher].
 func (r *Registry) Register(s Scanner, f Fetcher) {
-	// A provider may contribute only a scanner or only a fetcher, so each half is registered
-	// independently and nil halves are simply skipped.
 	if s != nil {
 		r.scanners = append(r.scanners, s)
 	}
@@ -76,7 +74,6 @@ func (r *Registry) Register(s Scanner, f Fetcher) {
 
 // ScannerFor returns the first registered scanner whose [Scanner.Detect] accepts path.
 func (r *Registry) ScannerFor(path string) (Scanner, bool) {
-	// Scanners are checked in registration order; the first one that claims the path wins.
 	for _, s := range r.scanners {
 		if s.Detect(path) {
 			return s, true

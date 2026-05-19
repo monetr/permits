@@ -19,12 +19,9 @@ func Write(dir string, summary model.Summary) error {
 		return err
 	}
 
-	// Track filenames already used within each dependency directory so that collisions (the same
+	// Track filenames already used within each dependency directory so that collisions (same
 	// SPDX id, or repeated original names) get a numeric suffix instead of overwriting each other.
 	used := make(map[string]bool)
-
-	// Write every artifact to its own Markdown file first, recording the relative path back onto
-	// the artifact so it can be serialized into summary.json below.
 	for i := range summary.Dependencies {
 		for j := range summary.Dependencies[i].Artifacts {
 			art := &summary.Dependencies[i].Artifacts[j]
@@ -38,7 +35,6 @@ func Write(dir string, summary model.Summary) error {
 		}
 	}
 
-	// The summary index is written last so it always reflects the paths assigned above.
 	f, err := os.Create(filepath.Join(dir, "summary.json"))
 	if err != nil {
 		return err
@@ -54,8 +50,6 @@ func Write(dir string, summary model.Summary) error {
 // writeArtifact writes one Markdown file and returns its slash-separated path relative to dir (the
 // directory that also holds summary.json).
 func writeArtifact(dir string, a model.LicenseArtifact, used map[string]bool) (string, error) {
-	// Mirror the dependency's identity into the directory tree so the on-disk layout is
-	// browsable: <ecosystem>/<name>/<version>/.
 	depDir := filepath.Join(dir, segment(string(a.Ecosystem)), nameToPath(a.Name), segment(a.Version))
 	if err := os.MkdirAll(depDir, 0o755); err != nil {
 		return "", err
@@ -63,8 +57,6 @@ func writeArtifact(dir string, a model.LicenseArtifact, used map[string]bool) (s
 
 	path := uniquePath(depDir, baseName(a), used)
 
-	// Emit the YAML frontmatter block. The declared license is optional and only written when the
-	// upstream metadata actually provided one.
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "name: %s\n", a.Name)
@@ -80,8 +72,6 @@ func writeArtifact(dir string, a model.LicenseArtifact, used map[string]bool) (s
 	fmt.Fprintf(&b, "retrievedAt: %s\n", a.RetrievedAt.Format("2006-01-02T15:04:05Z07:00"))
 	b.WriteString("---\n\n")
 
-	// Append the verbatim license text, guaranteeing a trailing newline so the file is well-formed
-	// even when the upstream text did not end in one.
 	b.WriteString(a.Text)
 	if !strings.HasSuffix(a.Text, "\n") {
 		b.WriteByte('\n')
@@ -100,7 +90,7 @@ func writeArtifact(dir string, a model.LicenseArtifact, used map[string]bool) (s
 }
 
 // baseName is the file stem (".md" is added later): the SPDX id when exactly one was detected,
-// otherwise the original in-package filename with any license-ish extension stripped so we do not
+// otherwise the original in-package filename with any license-ish extension stripped so we don't
 // produce e.g. "LICENSE.md.md".
 func baseName(a model.LicenseArtifact) string {
 	if len(a.SPDX) == 1 {
@@ -127,8 +117,6 @@ func stripLicenseExt(name string) string {
 // this run.
 func uniquePath(depDir, stem string, used map[string]bool) string {
 	for i := 1; ; i++ {
-		// The first occurrence keeps the bare stem; only subsequent collisions get a numeric
-		// suffix so the common case stays readable.
 		name := stem
 		if i > 1 {
 			name = fmt.Sprintf("%s-%d", stem, i)

@@ -24,15 +24,11 @@ var allowedExt = map[string]struct{}{
 
 // IsLicenseFile reports whether the given path's base name looks like a license or notice file.
 func IsLicenseFile(p string) bool {
-	// Normalize archive/OS separators and fold case so the comparisons below do not have to worry
-	// about either of those concerns.
 	base := strings.ToLower(path.Base(filepathToSlash(p)))
 	if base == "" {
 		return false
 	}
 
-	// The file must carry one of the allowed documentation extensions (or none at all); reject
-	// anything else outright before we bother running the more expensive regular expression.
 	ext := path.Ext(base)
 	if _, ok := allowedExt[ext]; !ok {
 		return false

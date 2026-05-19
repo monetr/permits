@@ -73,9 +73,6 @@ type LicenseArtifact struct {
 // stay consistent across ecosystems. [LicenseArtifact.SPDX] is left empty for
 // the collector to fill.
 func NewLicenseArtifact(dep Dependency, declared, fileName, source string, raw []byte) LicenseArtifact {
-	// Truncate before hashing so the digest always describes exactly the bytes we retain. A
-	// pathological or hostile input cannot blow up memory past the cap, and the SHA-256 stays a
-	// faithful fingerprint of the stored text.
 	if len(raw) > MaxLicenseBytes {
 		raw = raw[:MaxLicenseBytes]
 	}

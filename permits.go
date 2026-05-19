@@ -49,10 +49,6 @@ type Options struct {
 	Logf func(format string, args ...any)
 }
 
-// withDefaults returns a copy of the options with every unset or invalid field replaced by a sane
-// default. Callers may pass a zero-value [Options] and still get a working configuration; the
-// collector always normalizes through here so the rest of the package never has to guard against
-// zero values.
 func (o Options) withDefaults() Options {
 	if o.Concurrency < 1 {
 		o.Concurrency = 8
@@ -62,8 +58,6 @@ func (o Options) withDefaults() Options {
 		o.Timeout = 30 * time.Second
 	}
 
-	// A nil logger would panic the first time a provider reports progress, so substitute a no-op
-	// sink rather than make every call site nil-check.
 	if o.Logf == nil {
 		o.Logf = func(string, ...any) {}
 	}
@@ -76,9 +70,6 @@ func (o Options) withDefaults() Options {
 func DefaultRegistry(opts Options) *provider.Registry {
 	opts = opts.withDefaults()
 
-	// Wire the two ecosystems we ship out of the box. Each provider gets only the configuration it
-	// needs; additional ecosystems are added by the caller registering more scanner/fetcher pairs
-	// on the returned registry.
 	r := provider.NewRegistry()
 	r.Register(npm.NewScanner(), npm.NewFetcher(opts.NpmRegistry, opts.NodeModulesDirs, opts.Timeout))
 	r.Register(gomod.NewScanner(), gomod.NewFetcher(opts.GoCacheDir, opts.GoProxy, opts.Timeout))
@@ -103,16 +94,11 @@ func NewCollector(reg *provider.Registry, opts Options) *Collector {
 // with the flat list of every artifact. A per-dependency failure does not abort
 // the run; it is recorded in the [model.Summary].
 func (c *Collector) Collect(ctx context.Context, files ...string) (model.Summary, []model.LicenseArtifact, error) {
-	// Resolve every input file into a single deduplicated dependency set first. A scan error is
-	// fatal because we cannot meaningfully report licenses for a set we failed to build.
 	deps, err := c.scan(ctx, files)
 	if err != nil {
 		return model.Summary{}, nil, err
 	}
 
-	// Fetch the dependencies concurrently. The semaphore bounds in-flight fetches to the
-	// configured concurrency, and each result is written into its own slot so the goroutines
-	// never contend on a shared accumulator.
 	results := make([]model.DepResult, len(deps))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, c.opts.Concurrency)
@@ -129,9 +115,6 @@ func (c *Collector) Collect(ctx context.Context, files ...string) (model.Summary
 
 	wg.Wait()
 
-	// Assemble the run summary. We tally every dependency by its terminal status and flatten the
-	// per-dependency artifacts into the single list callers consume; a per-dependency failure was
-	// already captured above and never aborts the run.
 	summary := model.Summary{
 		GeneratedAt:  time.Now().UTC(),
 		Dependencies: results,
@@ -154,10 +137,6 @@ func (c *Collector) Collect(ctx context.Context, files ...string) (model.Summary
 	return summary, all, nil
 }
 
-// scan walks every input file, dispatches it to the scanner registered for its shape, and merges
-// the discovered dependencies into a single deduplicated set keyed by [model.Dependency.Key]. A
-// file with no matching scanner is skipped rather than treated as an error so callers can pass a
-// heterogeneous mix of lockfiles.
 func (c *Collector) scan(ctx context.Context, files []string) ([]model.Dependency, error) {
 	seen := make(map[string]struct{})
 
@@ -169,9 +148,6 @@ func (c *Collector) scan(ctx context.Context, files []string) ([]model.Dependenc
 			continue
 		}
 
-		// In direct-only mode the scanner must be able to distinguish top-level dependencies from
-		// transitive ones; not every scanner can, so fail loudly rather than silently returning
-		// the full transitive set.
 		var (
 			found []model.Dependency
 			err   error
@@ -191,8 +167,6 @@ func (c *Collector) scan(ctx context.Context, files []string) ([]model.Dependenc
 
 		c.opts.Logf("scanned %s: %d dependencies (directOnly=%v)", f, len(found), c.opts.DirectOnly)
 
-		// Deduplicate across files: the same dependency frequently appears in more than one
-		// lockfile, and we only want to fetch and report its license once.
 		for _, d := range found {
 			if _, dup := seen[d.Key()]; dup {
 				continue
@@ -205,14 +179,9 @@ func (c *Collector) scan(ctx context.Context, files []string) ([]model.Dependenc
 	return deps, nil
 }
 
-// fetchOne resolves the license artifacts for a single dependency and returns its terminal
-// [model.DepResult]. Every failure path is folded into the result rather than returned as an
-// error so that one bad dependency cannot abort the wider concurrent run in [Collector.Collect].
 func (c *Collector) fetchOne(ctx context.Context, dep model.Dependency) model.DepResult {
 	res := model.DepResult{Dependency: dep}
 
-	// There must be a fetcher registered for the dependency's ecosystem; without one we cannot
-	// retrieve anything, so record the failure and move on.
 	fetcher, err := c.reg.FetcherFor(dep.Ecosystem)
 	if err != nil {
 		res.Status = model.StatusFailed
@@ -220,8 +189,6 @@ func (c *Collector) fetchOne(ctx context.Context, dep model.Dependency) model.De
 		return res
 	}
 
-	// Bound the network fetch by the configured per-request timeout so a single slow registry or
-	// proxy cannot stall the whole run.
 	fctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	defer cancel()
 
@@ -233,8 +200,6 @@ func (c *Collector) fetchOne(ctx context.Context, dep model.Dependency) model.De
 		return res
 	}
 
-	// A successful fetch that yields nothing is distinct from a failure: the dependency exists,
-	// it simply ships no recoverable license file.
 	if len(arts) == 0 {
 		res.Status = model.StatusNoLicenseFound
 		return res

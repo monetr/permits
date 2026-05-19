@@ -17,8 +17,6 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	// Compile the CLI a single time up front so each test can exec the real binary instead of
-	// re-building or invoking main() in-process.
 	binPath = filepath.Join(dir, "permits")
 	build := exec.Command("go", "build", "-o", binPath, ".")
 	if out, err := build.CombinedOutput(); err != nil {
@@ -30,16 +28,12 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// runCLI executes the previously-built binary and returns its combined output along with the
-// process exit code, failing the test only on errors that are not a normal non-zero exit.
 func runCLI(t *testing.T, args ...string) (string, int) {
 	t.Helper()
 
 	cmd := exec.Command(binPath, args...)
 	out, err := cmd.CombinedOutput()
 
-	// A non-zero exit is an expected outcome for several tests, so unwrap ExitError into a
-	// code rather than treating it as a test failure; anything else is fatal.
 	code := 0
 	if ee, ok := err.(*exec.ExitError); ok {
 		code = ee.ExitCode()
@@ -53,8 +47,6 @@ func runCLI(t *testing.T, args ...string) (string, int) {
 func TestCLINoArgsExits2(t *testing.T) {
 	out, code := runCLI(t)
 
-	// With no lockfile inputs the CLI must reject the invocation with a usage error and the
-	// conventional "bad arguments" exit code of 2.
 	if code != 2 {
 		t.Fatalf("exit = %d, want 2; output:\n%s", code, out)
 	}
@@ -75,8 +67,6 @@ func writeLockProject(t *testing.T) string {
 		t.Fatal(err)
 	}
 
-	// Mirror the pnpm virtual store layout so the dependency declared above resolves entirely
-	// on disk, including its declared license.
 	pkgDir := filepath.Join(proj, "node_modules", ".pnpm", "demo@1.0.0", "node_modules", "demo")
 	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -102,8 +92,6 @@ func TestCLIResolvesFromSiblingNodeModules(t *testing.T) {
 		t.Fatalf("exit = %d, want 0; output:\n%s", code, out)
 	}
 
-	// The license must be written to the per-dependency output path and record that it came
-	// from the local node_modules resolution rather than the registry.
 	md, err := os.ReadFile(filepath.Join(outDir, "npm", "demo", "1.0.0", "LICENSE.md"))
 	if err != nil {
 		t.Fatalf("license md not written: %v", err)
@@ -113,7 +101,6 @@ func TestCLIResolvesFromSiblingNodeModules(t *testing.T) {
 		t.Errorf("unexpected license output:\n%s", s)
 	}
 
-	// A run summary must always be emitted alongside the per-dependency files.
 	if _, err := os.Stat(filepath.Join(outDir, "summary.json")); err != nil {
 		t.Errorf("summary.json not written: %v", err)
 	}
@@ -135,8 +122,6 @@ func TestCLIFailureExits1(t *testing.T) {
 		"-timeout", "2s",
 	)
 
-	// A dependency that cannot be resolved anywhere must fail the whole run with exit 1 and a
-	// summary line that reports the failure count.
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1; output:\n%s", code, out)
 	}

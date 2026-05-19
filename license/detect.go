@@ -20,15 +20,10 @@ func Detect(text string) []string {
 		return []string{}
 	}
 
-	// The fair-source family is checked first and short-circuits the rest of detection. These
-	// licenses embed the text of a *future* permissive license, so letting licensecheck run would
-	// produce partial matches against that embedded grant and mislabel the file.
 	if fs := fairSource(text); len(fs) > 0 {
 		return fs
 	}
 
-	// Hand the text to google/licensecheck and collect every distinct, non-empty SPDX identifier it
-	// reports. A single file can legitimately yield more than one (e.g. a dual-licensed LICENSE).
 	cov := licensecheck.Scan([]byte(text))
 	set := make(map[string]struct{}, len(cov.Match))
 	for _, m := range cov.Match {
@@ -50,14 +45,9 @@ func Detect(text string) []string {
 // builtin set lacks. Detection is anchored on these licenses' stable title lines and self-declared
 // abbreviations, matched against whitespace-normalized text so wrapping does not matter.
 func fairSource(text string) []string {
-	// Collapse all runs of whitespace into single spaces and lower-case the result so that the
-	// substring checks below are immune to line wrapping and capitalization differences.
 	n := strings.ToLower(strings.Join(strings.Fields(text), " "))
 	set := map[string]struct{}{}
 
-	// The Functional Source License names the permissive license it converts into in a "<X> Future
-	// License" line. We anchor on either the self-declared abbreviation or the stable title line
-	// paired with that future-license phrase.
 	hasFSLTitle := strings.Contains(n, "functional source license")
 	switch {
 	case strings.Contains(n, "fsl-1.1-mit"),
@@ -68,8 +58,6 @@ func fairSource(text string) []string {
 		set["FSL-1.1-ALv2"] = struct{}{}
 	}
 
-	// The Business Source License and the Elastic License are independent of the FSL above, so they
-	// are matched separately and may co-occur with it in unusual multi-license files.
 	if strings.Contains(n, "business source license 1.1") {
 		set["BUSL-1.1"] = struct{}{}
 	}
