@@ -66,12 +66,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One native GitHub-hosted runner per OS/arch we ship a binary for, so
-        # the suite runs on the real platform rather than under emulation.
+        # Native runner per target. GitHub no longer offers a free Intel-macOS
+        # runner, so darwin/amd64 is cross-compiled in the release workflow but
+        # cannot be natively tested here (no runner to schedule it on).
         include:
           - { target: linux/amd64, runs-on: ubuntu-latest }
           - { target: linux/arm64, runs-on: ubuntu-24.04-arm }
-          - { target: darwin/amd64, runs-on: macos-13 }
           - { target: darwin/arm64, runs-on: macos-14 }
           - { target: windows/amd64, runs-on: windows-latest }
           - { target: windows/arm64, runs-on: windows-11-arm }
