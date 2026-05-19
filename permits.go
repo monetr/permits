@@ -71,7 +71,9 @@ func DefaultRegistry(opts Options) *provider.Registry {
 	opts = opts.withDefaults()
 
 	r := provider.NewRegistry()
-	r.Register(npm.NewScanner(), npm.NewFetcher(opts.NpmRegistry, opts.NodeModulesDirs, opts.Timeout))
+	npmFetcher := npm.NewFetcher(opts.NpmRegistry, opts.NodeModulesDirs, opts.Timeout)
+	r.Register(npm.NewScanner(), npmFetcher)
+	r.Register(npm.NewPackageLockScanner(), npmFetcher)
 	r.Register(gomod.NewScanner(), gomod.NewFetcher(opts.GoCacheDir, opts.GoProxy, opts.Timeout))
 
 	return r
