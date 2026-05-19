@@ -4,40 +4,39 @@
 [![codecov](https://codecov.io/gh/monetr/permits/branch/main/graph/badge.svg)](https://codecov.io/gh/monetr/permits)
 [![Go Reference](https://pkg.go.dev/badge/github.com/monetr/permits.svg)](https://pkg.go.dev/github.com/monetr/permits)
 
-**Collect the real license text of every dependency you actually ship — not a guess from a metadata field.**
+permits collects the full license text of every dependency your project
+resolves. Instead of trusting the `license` field in a manifest, it fetches the
+actual `LICENSE` and `NOTICE` files from wherever the package is published and
+works out the SPDX identifier from the file contents.
 
-Most license tools read a `license` string out of a manifest and call it a day. `permits` goes to where
-each package is actually published, pulls the **verbatim `LICENSE` / `NOTICE` files**, and works out the
-**SPDX identifier(s)** from the text itself. That's the difference between "the manifest claims MIT" and
-"here is the exact copyright notice you're obligated to redistribute."
+It supports npm and Go. Almost all of the behavior lives in the library; the
+CLI is a small wrapper around it.
 
-It handles npm and Go today, and it's a library first — the CLI is a thin wrapper around it.
+Every file is stored exactly as published. If the text doesn't match a known
+license it's still saved, just without an SPDX id. Detection uses
+[`google/licensecheck`](https://github.com/google/licensecheck) and runs on the
+file contents, so one file can produce several ids (a combined MIT/Apache-2.0
+`LICENSE`, for example).
 
-## Why it's different
+permits also recognizes the source-available licenses licensecheck doesn't
+cover: `FSL-1.1-MIT`, `FSL-1.1-ALv2`, `BUSL-1.1`, and `Elastic-2.0`. For an FSL
+file it reports the current grant, not the future license embedded in the text.
 
-- **Verbatim text, always.** Every license file is captured exactly as published. Even when the text
-  can't be classified you still get the bytes — nothing is silently dropped.
-- **SPDX from the source, not the label.** Classification comes from the file contents via
-  [`google/licensecheck`](https://github.com/google/licensecheck), so one file can legitimately resolve
-  to several IDs — a dual MIT/Apache-2.0 `LICENSE`, for instance.
-- **Fair-source aware.** The source-available family `licensecheck` doesn't know — `FSL-1.1-MIT`,
-  `FSL-1.1-ALv2`, `BUSL-1.1`, `Elastic-2.0` — is detected and treated as authoritative. An FSL file
-  embeds its *future* license; permits won't mistake that for the grant you have today.
-- **Local-first.** If a dependency is already on disk, permits reads it there and never touches the
-  network.
+It looks on disk before going to the network:
 
 | Ecosystem | Scanned file     | License source                                      |
 |-----------|------------------|-----------------------------------------------------|
 | npm       | `pnpm-lock.yaml` | local `node_modules`, then the npm registry tarball |
 | Go        | `go.sum`         | local module cache, then the Go module proxy        |
 
-"Local-first" is literal. A package found locally (npm under `node_modules`, including pnpm's `.pnpm`
-store; Go in the module cache) is used as-is. If that local copy has no license file, permits trusts
-that answer and records "no license" rather than second-guessing it over the network.
+If a package is already installed (npm in `node_modules`, including pnpm's
+`.pnpm` store, or Go in the module cache), that copy is used and the network is
+skipped. A package that exists locally but has no license file is taken at face
+value: permits records "no license" rather than falling back to the registry.
 
-By default permits walks the **full resolved graph**, transitive dependencies and all. Pass `-direct`
-to keep only your top-level dependencies (pnpm `importers`/root deps, and `go.mod` requires that aren't
-marked `// indirect`).
+By default it scans the whole dependency graph, transitive dependencies
+included. `-direct` limits it to your direct dependencies: the pnpm
+`importers`/root deps, and `go.mod` requires not marked `// indirect`.
 
 ## Install
 
@@ -70,11 +69,12 @@ permits \
 | `-strict`       | `false`      | exit non-zero if any dependency yields no license          |
 | `-v`            | `false`      | verbose progress logging                                   |
 
-Exit codes: **`0`** clean · **`1`** failures (or `-strict` with missing licenses) · **`2`** usage / I/O error.
+Exit codes: `0` on success, `1` if a dependency failed (or `-strict` and
+something had no license), `2` on a usage or I/O error.
 
 ### Output
 
-permits writes a machine-readable `summary.json` plus one Markdown file per dependency-and-license-file:
+permits writes a `summary.json` and one Markdown file per license file:
 
 ```
 licenses/
@@ -86,13 +86,14 @@ licenses/
   go/gopkg.in/yaml.v3/v3.0.1/LICENSE.md      # dual MIT/Apache -> original name
 ```
 
-The shape is `<ecosystem>/<name>/<version>/<file>.md`. Scoped npm names (`@scope/pkg`) and Go module
-paths (`host.com/x/y`) nest as real directories. The filename is the detected **SPDX id** when there's
-exactly one; otherwise it falls back to the original in-package name, so dual-licensed or
-unclassifiable files keep their `LICENSE.md` / `NOTICE.md`. Name collisions get a `-2`, `-3` suffix,
-and any `.` / `..` / path separators inside a segment are flattened to `_`.
+Paths are `<ecosystem>/<name>/<version>/<file>.md`. Scoped npm names
+(`@scope/pkg`) and Go module paths (`host.com/x/y`) become nested directories.
+The filename is the SPDX id when exactly one is detected; otherwise it's the
+original in-package filename, so dual-licensed or unrecognized files keep their
+`LICENSE.md` or `NOTICE.md`. Repeated names get a `-2`, `-3` suffix, and `.`,
+`..`, or path separators inside a segment become `_`.
 
-Each Markdown file is YAML frontmatter followed by the untouched license text:
+Each file is YAML frontmatter followed by the original license text:
 
 ```
 ---
@@ -112,7 +113,7 @@ retrievedAt: 2026-05-18T00:00:00Z
 
 ## Library
 
-The CLI is just a thin consumer — the library is the real surface.
+The CLI just calls the library:
 
 ```go
 import (
@@ -128,13 +129,13 @@ summary, artifacts, err := c.Collect(ctx, "pnpm-lock.yaml", "go.sum")
 _ = output.Write("./licenses", summary)
 ```
 
-`artifacts` is a flat list of every `model.LicenseArtifact`, raw `Text` included, so you can embed
-permits without ever touching the filesystem.
+`artifacts` is a flat slice of `model.LicenseArtifact` including the raw `Text`,
+so you can use permits without writing anything to disk.
 
 ### Adding an ecosystem
 
-Implement `provider.Scanner` and `provider.Fetcher`, register the pair, and you're done — the
-collector never changes:
+Implement `provider.Scanner` and `provider.Fetcher` and register them; the
+collector doesn't change:
 
 ```go
 reg := permits.DefaultRegistry(opts) // or provider.NewRegistry()
@@ -142,9 +143,9 @@ reg.Register(myCargoScanner, myCargoFetcher)
 c := permits.NewCollector(reg, opts)
 ```
 
-A `Scanner` turns a lockfile into `[]model.Dependency`; a `Fetcher` turns one `model.Dependency` into
-`[]model.LicenseArtifact`. `provider/npm` and `provider/gomod` are the reference implementations to
-copy from.
+A `Scanner` parses a lockfile into `[]model.Dependency`; a `Fetcher` turns one
+`model.Dependency` into `[]model.LicenseArtifact`. `provider/npm` and
+`provider/gomod` are working examples to copy.
 
 ## Development
 
