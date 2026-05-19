@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.0-rc.2](https://github.com/monetr/permits/compare/v1.0.0-rc.1...v1.0.0-rc.2) (2026-05-19)
+
+
+### Bug Fixes
+
+* **build:** Fixing release pipeline ([b14c7a3](https://github.com/monetr/permits/commit/b14c7a328415ea112b3e580faa8bfb9b1d4ffb59))
+
 ## 1.0.0-rc.1 (2026-05-19)
 
 
