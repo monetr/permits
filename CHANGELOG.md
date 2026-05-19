@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0](https://github.com/monetr/permits/compare/v1.0.0...v1.1.0) (2026-05-19)
+
+
+### Features
+
+* Adding support for `package-lock.json` ([70ef893](https://github.com/monetr/permits/commit/70ef8933459810159b295a9b59fd77ffada4c6e0))
+
+
+### Bug Fixes
+
+* Fixing dumb license name collision ([155fbd7](https://github.com/monetr/permits/commit/155fbd7a0966444e950760a81c4f087429c9c5ce))
+
 ## [1.0.0](https://github.com/monetr/permits/compare/v1.0.0-rc.3...v1.0.0) (2026-05-19)
 
 
