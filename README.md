@@ -1,6 +1,7 @@
 # permits
 
 [![CI](https://github.com/monetr/permits/actions/workflows/ci.yml/badge.svg)](https://github.com/monetr/permits/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/monetr/permits/branch/main/graph/badge.svg)](https://codecov.io/gh/monetr/permits)
 [![Go Reference](https://pkg.go.dev/badge/github.com/monetr/permits.svg)](https://pkg.go.dev/github.com/monetr/permits)
 
 **Collect the real license text of every dependency you actually ship — not a guess from a metadata field.**
