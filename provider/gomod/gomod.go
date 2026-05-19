@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/monetr/permits/internal/httpx"
-	"github.com/monetr/permits/license"
+	"github.com/monetr/permits/licenses"
 	"github.com/monetr/permits/model"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -243,7 +243,7 @@ func (f *Fetcher) fromCache(dep model.Dependency, escPath, escVer string) ([]mod
 			return walkErr
 		}
 
-		if d.IsDir() || !license.IsLicenseFile(p) {
+		if d.IsDir() || !licenses.IsLicenseFile(p) {
 			return nil
 		}
 
@@ -288,7 +288,7 @@ func (f *Fetcher) fromProxy(ctx context.Context, dep model.Dependency, escPath, 
 
 		var artifacts []model.LicenseArtifact
 		for _, zf := range zr.File {
-			if zf.FileInfo().IsDir() || !license.IsLicenseFile(zf.Name) {
+			if zf.FileInfo().IsDir() || !licenses.IsLicenseFile(zf.Name) {
 				continue
 			}
 

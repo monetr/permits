@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/monetr/permits/license"
+	"github.com/monetr/permits/licenses"
 	"github.com/monetr/permits/model"
 	"github.com/monetr/permits/provider"
 	"github.com/monetr/permits/provider/gomod"
@@ -210,7 +210,7 @@ func (c *Collector) fetchOne(ctx context.Context, dep model.Dependency) model.De
 	// Classify SPDX centrally so every provider, the summary, and the returned artifacts stay
 	// consistent.
 	for i := range arts {
-		arts[i].SPDX = license.Detect(arts[i].Text)
+		arts[i].SPDX = licenses.Detect(arts[i].Text)
 	}
 
 	res.Status = model.StatusResolved

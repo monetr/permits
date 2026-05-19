@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/monetr/permits/internal/httpx"
-	"github.com/monetr/permits/license"
+	"github.com/monetr/permits/licenses"
 	"github.com/monetr/permits/model"
 	"gopkg.in/yaml.v3"
 )
@@ -445,7 +445,7 @@ func (f *Fetcher) readPackageDir(dir string, dep model.Dependency) []model.Licen
 
 	artifacts := []model.LicenseArtifact{}
 	for _, e := range entries {
-		if e.IsDir() || !license.IsLicenseFile(e.Name()) {
+		if e.IsDir() || !licenses.IsLicenseFile(e.Name()) {
 			continue
 		}
 
@@ -517,7 +517,7 @@ func extractTarball(tgz []byte, dep model.Dependency, declared string) ([]model.
 
 		// npm tarballs nest everything under "package/".
 		rel := strings.TrimPrefix(path.Clean(hdr.Name), "package/")
-		if !license.IsLicenseFile(rel) {
+		if !licenses.IsLicenseFile(rel) {
 			continue
 		}
 

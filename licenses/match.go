@@ -1,7 +1,7 @@
-// Package license provides ecosystem-agnostic detection of license files by filename. It is
+// Package licenses provides ecosystem-agnostic detection of license files by filename. It is
 // intentionally conservative: it matches the conventional license/notice filenames and ignores
 // source files that merely contain the word "license" (e.g. license-checker.js).
-package license
+package licenses
 
 import (
 	"path"
