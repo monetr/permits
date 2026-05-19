@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.0](https://github.com/monetr/permits/compare/v1.0.0-rc.3...v1.0.0) (2026-05-19)
+
+
+### Miscellaneous
+
+* Cleaning up README ([884329e](https://github.com/monetr/permits/commit/884329ec0e6abb1661c0f105945a695cd84d3bd8))
+
 ## [1.0.0-rc.3](https://github.com/monetr/permits/compare/v1.0.0-rc.2...v1.0.0-rc.3) (2026-05-19)
 
 
