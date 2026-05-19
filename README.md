@@ -1,35 +1,44 @@
 # permits
 
-`permits` gathers the **verbatim license text** of every dependency a project
-actually resolves, and classifies each file's **SPDX license identifier(s)**
-(via [`google/licensecheck`](https://github.com/google/licensecheck) — a single
-file may yield several, e.g. a dual MIT/Apache-2.0 `LICENSE`). The "fair
-source" family that licensecheck lacks (`FSL-1.1-MIT`, `FSL-1.1-ALv2`,
-`BUSL-1.1`, `Elastic-2.0`) is detected too, and is authoritative for the file
-(the future-license text embedded in FSL is not treated as the current grant).
-Text is always captured verbatim even when the license cannot be classified.
-It scans lockfiles and pulls the raw license files straight from where the
-packages are published:
+[![CI](https://github.com/monetr/permits/actions/workflows/ci.yml/badge.svg)](https://github.com/monetr/permits/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/monetr/permits.svg)](https://pkg.go.dev/github.com/monetr/permits)
 
-| Ecosystem | Scanned file    | License source                                          |
-|-----------|-----------------|---------------------------------------------------------|
-| npm       | `pnpm-lock.yaml`| local `node_modules`, then the npm registry tarball     |
-| Go        | `go.sum`        | local Go module cache, then the Go module proxy         |
+**Collect the real license text of every dependency you actually ship — not a guess from a metadata field.**
 
-Both ecosystems are **local-first**: if the dependency is already installed
-(an npm package in `node_modules` — including the pnpm `.pnpm` virtual store —
-or a Go module in the cache) and contains a license file, that copy is used and
-the network is not contacted. A package present locally with no license file is
-treated as authoritative ("no license"), not retried remotely.
+Most license tools read a `license` string out of a manifest and call it a day. `permits` goes to where
+each package is actually published, pulls the **verbatim `LICENSE` / `NOTICE` files**, and works out the
+**SPDX identifier(s)** from the text itself. That's the difference between "the manifest claims MIT" and
+"here is the exact copyright notice you're obligated to redistribute."
 
-By default it scans the **full resolved set** (including transitive
-dependencies); pass `-direct` to restrict to direct/top-level dependencies
-(pnpm `importers`/root deps and `go.mod` non-`// indirect` requires). It emits
-a machine-readable `summary.json` plus one Markdown file per
-dependency-and-license-file, each with YAML frontmatter followed by the
-verbatim text.
+It handles npm and Go today, and it's a library first — the CLI is a thin wrapper around it.
 
-## Install / build
+## Why it's different
+
+- **Verbatim text, always.** Every license file is captured exactly as published. Even when the text
+  can't be classified you still get the bytes — nothing is silently dropped.
+- **SPDX from the source, not the label.** Classification comes from the file contents via
+  [`google/licensecheck`](https://github.com/google/licensecheck), so one file can legitimately resolve
+  to several IDs — a dual MIT/Apache-2.0 `LICENSE`, for instance.
+- **Fair-source aware.** The source-available family `licensecheck` doesn't know — `FSL-1.1-MIT`,
+  `FSL-1.1-ALv2`, `BUSL-1.1`, `Elastic-2.0` — is detected and treated as authoritative. An FSL file
+  embeds its *future* license; permits won't mistake that for the grant you have today.
+- **Local-first.** If a dependency is already on disk, permits reads it there and never touches the
+  network.
+
+| Ecosystem | Scanned file     | License source                                      |
+|-----------|------------------|-----------------------------------------------------|
+| npm       | `pnpm-lock.yaml` | local `node_modules`, then the npm registry tarball |
+| Go        | `go.sum`         | local module cache, then the Go module proxy        |
+
+"Local-first" is literal. A package found locally (npm under `node_modules`, including pnpm's `.pnpm`
+store; Go in the module cache) is used as-is. If that local copy has no license file, permits trusts
+that answer and records "no license" rather than second-guessing it over the network.
+
+By default permits walks the **full resolved graph**, transitive dependencies and all. Pass `-direct`
+to keep only your top-level dependencies (pnpm `importers`/root deps, and `go.mod` requires that aren't
+marked `// indirect`).
+
+## Install
 
 ```sh
 make build      # produces ./permits
@@ -37,7 +46,7 @@ make build      # produces ./permits
 go build -o permits ./cmd/permits
 ```
 
-## CLI usage
+## CLI
 
 ```sh
 permits \
@@ -46,26 +55,25 @@ permits \
   -out ./licenses
 ```
 
-Flags (stdlib `flag`):
-
-| Flag            | Default      | Meaning                                            |
-|-----------------|--------------|----------------------------------------------------|
-| `-pnpm-lock`    | —            | path to a `pnpm-lock.yaml` (repeatable)            |
-| `-go-sum`       | —            | path to a `go.sum` (repeatable)                    |
-| `-out`          | `./licenses` | output directory                                   |
-| `-concurrency`  | `8`          | parallel fetch workers                             |
-| `-goproxy`      | env GOPROXY  | override Go proxy list                             |
-| `-npm-registry` | npmjs.org    | override npm registry base URL                     |
+| Flag            | Default      | Meaning                                                    |
+|-----------------|--------------|------------------------------------------------------------|
+| `-pnpm-lock`    | —            | path to a `pnpm-lock.yaml` (repeatable)                    |
+| `-go-sum`       | —            | path to a `go.sum` (repeatable)                            |
+| `-out`          | `./licenses` | output directory                                           |
+| `-concurrency`  | `8`          | parallel fetch workers                                     |
+| `-goproxy`      | env GOPROXY  | override Go proxy list                                     |
+| `-npm-registry` | npmjs.org    | override npm registry base URL                             |
 | `-node-modules` | lock sibling | node_modules root checked before the registry (repeatable) |
-| `-timeout`      | `30s`        | per-request timeout                                |
+| `-timeout`      | `30s`        | per-request timeout                                        |
 | `-direct`       | `false`      | only resolve direct (top-level) deps, excluding transitive |
-| `-strict`       | `false`      | exit non-zero if any dependency yields no license  |
-| `-v`            | `false`      | verbose progress logging                           |
+| `-strict`       | `false`      | exit non-zero if any dependency yields no license          |
+| `-v`            | `false`      | verbose progress logging                                   |
 
-Exit codes: `0` all good · `1` failures (or `-strict` with missing licenses) ·
-`2` usage/IO error.
+Exit codes: **`0`** clean · **`1`** failures (or `-strict` with missing licenses) · **`2`** usage / I/O error.
 
-### Output layout
+### Output
+
+permits writes a machine-readable `summary.json` plus one Markdown file per dependency-and-license-file:
 
 ```
 licenses/
@@ -77,13 +85,13 @@ licenses/
   go/gopkg.in/yaml.v3/v3.0.1/LICENSE.md      # dual MIT/Apache -> original name
 ```
 
-Layout is `<ecosystem>/<name>/<version>/<file>.md`. Scoped npm names
-(`@scope/pkg`) and Go module paths (`host.com/x/y`) nest as real directories.
-The file stem is the detected **SPDX id** when exactly one is found, otherwise
-the original in-package filename (so dual-license or unclassifiable files keep
-`LICENSE.md` / `NOTICE.md`); same-name collisions get a `-2`, `-3` suffix. Path
-segments containing `.`/`..`/separators are sanitized to `_`. Each Markdown
-file:
+The shape is `<ecosystem>/<name>/<version>/<file>.md`. Scoped npm names (`@scope/pkg`) and Go module
+paths (`host.com/x/y`) nest as real directories. The filename is the detected **SPDX id** when there's
+exactly one; otherwise it falls back to the original in-package name, so dual-licensed or
+unclassifiable files keep their `LICENSE.md` / `NOTICE.md`. Name collisions get a `-2`, `-3` suffix,
+and any `.` / `..` / path separators inside a segment are flattened to `_`.
+
+Each Markdown file is YAML frontmatter followed by the untouched license text:
 
 ```
 ---
@@ -98,12 +106,12 @@ sha256: <hex>
 retrievedAt: 2026-05-18T00:00:00Z
 ---
 
-<verbatim license text, emitted as-is after the frontmatter>
+<verbatim license text, emitted exactly as published>
 ```
 
-## Library usage
+## Library
 
-The CLI is just a thin consumer; the library is the primary surface.
+The CLI is just a thin consumer — the library is the real surface.
 
 ```go
 import (
@@ -115,17 +123,17 @@ opts := permits.Options{Concurrency: 8}
 c := permits.NewCollector(permits.DefaultRegistry(opts), opts)
 
 summary, artifacts, err := c.Collect(ctx, "pnpm-lock.yaml", "go.sum")
-// summary/artifacts are usable directly; writing files is optional:
+// summary and artifacts are ready to use; writing files is optional.
 _ = output.Write("./licenses", summary)
 ```
 
-`artifacts` is the flat list of every `model.LicenseArtifact` (including the raw
-`Text`), so the library can be embedded without ever touching the filesystem.
+`artifacts` is a flat list of every `model.LicenseArtifact`, raw `Text` included, so you can embed
+permits without ever touching the filesystem.
 
-## Adding a new ecosystem
+### Adding an ecosystem
 
-Implement `provider.Scanner` + `provider.Fetcher` and register them — no
-collector changes:
+Implement `provider.Scanner` and `provider.Fetcher`, register the pair, and you're done — the
+collector never changes:
 
 ```go
 reg := permits.DefaultRegistry(opts) // or provider.NewRegistry()
@@ -133,9 +141,9 @@ reg.Register(myCargoScanner, myCargoFetcher)
 c := permits.NewCollector(reg, opts)
 ```
 
-A `Scanner` turns a lockfile into `[]model.Dependency`; a `Fetcher` turns one
-`model.Dependency` into `[]model.LicenseArtifact`. See `provider/npm` and
-`provider/gomod` for reference implementations.
+A `Scanner` turns a lockfile into `[]model.Dependency`; a `Fetcher` turns one `model.Dependency` into
+`[]model.LicenseArtifact`. `provider/npm` and `provider/gomod` are the reference implementations to
+copy from.
 
 ## Development
 
