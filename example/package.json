@@ -1,0 +1,9 @@
+{
+  "name": "permits-example",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Example project for exercising permits against @monetr/notify.",
+  "dependencies": {
+    "@monetr/notify": "1.0.4"
+  }
+}
