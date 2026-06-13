@@ -87,18 +87,21 @@ func writeArtifact(dir string, a model.LicenseArtifact, used map[string]bool) (s
 	path := uniquePath(depDir, baseName(a), used)
 
 	var b strings.Builder
+	// Every value is written as a quoted scalar. A bare version like "1.0" or the RFC3339
+	// retrievedAt would otherwise be parsed as a float or a timestamp instead of the string we
+	// mean, and a stray colon or quote in a package name or license id would break the document.
 	b.WriteString("---\n")
-	fmt.Fprintf(&b, "name: %s\n", a.Name)
-	fmt.Fprintf(&b, "version: %s\n", a.Version)
-	fmt.Fprintf(&b, "ecosystem: %s\n", a.Ecosystem)
+	fmt.Fprintf(&b, "name: %s\n", yamlString(a.Name))
+	fmt.Fprintf(&b, "version: %s\n", yamlString(a.Version))
+	fmt.Fprintf(&b, "ecosystem: %s\n", yamlString(string(a.Ecosystem)))
 	if a.DeclaredLicense != "" {
-		fmt.Fprintf(&b, "declaredLicense: %q\n", a.DeclaredLicense)
+		fmt.Fprintf(&b, "declaredLicense: %s\n", yamlString(a.DeclaredLicense))
 	}
 	fmt.Fprintf(&b, "spdx: [%s]\n", strings.Join(quoteAll(a.SPDX), ", "))
-	fmt.Fprintf(&b, "licenseFile: %q\n", a.FileName)
-	fmt.Fprintf(&b, "source: %s\n", a.Source)
-	fmt.Fprintf(&b, "sha256: %s\n", a.SHA256)
-	fmt.Fprintf(&b, "retrievedAt: %s\n", a.RetrievedAt.Format("2006-01-02T15:04:05Z07:00"))
+	fmt.Fprintf(&b, "licenseFile: %s\n", yamlString(a.FileName))
+	fmt.Fprintf(&b, "source: %s\n", yamlString(a.Source))
+	fmt.Fprintf(&b, "sha256: %s\n", yamlString(a.SHA256))
+	fmt.Fprintf(&b, "retrievedAt: %s\n", yamlString(a.RetrievedAt.Format("2006-01-02T15:04:05Z07:00")))
 	b.WriteString("---\n\n")
 
 	b.WriteString(a.Text)
@@ -184,8 +187,23 @@ func segment(s string) string {
 func quoteAll(in []string) []string {
 	out := make([]string, len(in))
 	for i, s := range in {
-		out[i] = fmt.Sprintf("%q", s)
+		out[i] = yamlString(s)
 	}
 
 	return out
+}
+
+// yamlString renders s as a double-quoted YAML scalar. JSON's string encoding is a strict subset
+// of YAML's flow scalar syntax, so going through encoding/json gives us correct escaping of quotes,
+// backslashes, and control characters for free, and the result is always valid YAML. HTML escaping
+// is turned off so the "<", ">", and "&" that show up in license urls and prose stay readable
+// instead of getting rewritten into their numeric escapes.
+func yamlString(s string) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	// Encode tacks on a trailing newline we do not want in the middle of a line.
+	_ = enc.Encode(s)
+
+	return strings.TrimSuffix(b.String(), "\n")
 }

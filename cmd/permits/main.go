@@ -31,16 +31,19 @@ func main() {
 }
 
 func run() int {
-	var pnpmLocks, goSums, nodeModules stringSlice
+	var pnpmLocks, goSums, nodeModules, trustHosts stringSlice
 	flag.Var(&pnpmLocks, "pnpm-lock", "path to a pnpm-lock.yaml (repeatable)")
 	flag.Var(&goSums, "go-sum", "path to a go.sum (repeatable)")
 	flag.Var(&nodeModules, "node-modules", "node_modules root to check before the npm registry (repeatable); defaults to each pnpm-lock's sibling node_modules")
+	flag.Var(&trustHosts, "trust-host", "with -strip-links, host whose links stay live, subdomains included, e.g. github.com (repeatable)")
 	out := flag.String("out", "./licenses", "output directory")
 	concurrency := flag.Int("concurrency", 8, "parallel fetch workers")
 	goproxy := flag.String("goproxy", "", "override GOPROXY list")
 	npmRegistry := flag.String("npm-registry", "", "override npm registry base URL")
 	timeout := flag.Duration("timeout", 30*time.Second, "per-request timeout")
 	direct := flag.Bool("direct", false, "only resolve direct (top-level) dependencies, excluding transitive")
+	stripLinks := flag.Bool("strip-links", false, "censor links in license text (github.com/foo -> github[dot]com/foo) and neutralize raw HTML; relative links resolve against the package repository when known")
+	stripHTML := flag.Bool("strip-html", false, "with -strip-links, remove HTML elements from license text entirely instead of escaping them")
 	strict := flag.Bool("strict", false, "exit non-zero if any dependency yields no license")
 	verbose := flag.Bool("v", false, "verbose progress logging")
 	flag.Parse()
@@ -73,6 +76,9 @@ func run() int {
 		Timeout:         *timeout,
 		Strict:          *strict,
 		DirectOnly:      *direct,
+		StripLinks:      *stripLinks,
+		TrustedHosts:    trustHosts,
+		StripHTML:       *stripHTML,
 		NpmRegistry:     *npmRegistry,
 		NodeModulesDirs: nmDirs,
 		GoProxy:         *goproxy,

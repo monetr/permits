@@ -103,7 +103,7 @@ func TestCLIResolvesFromSiblingNodeModules(t *testing.T) {
 		t.Fatalf("license md not written: %v", err)
 	}
 	s := string(md)
-	if !strings.Contains(s, "source: npm-node-modules") || !strings.Contains(s, "MIT-ish demo license") {
+	if !strings.Contains(s, `source: "npm-node-modules"`) || !strings.Contains(s, "MIT-ish demo license") {
 		t.Errorf("unexpected license output:\n%s", s)
 	}
 

@@ -161,6 +161,9 @@ func TestFetcherProxyFallback(t *testing.T) {
 	if arts[0].Text != "x/mod BSD license text" {
 		t.Errorf("unexpected text: %q", arts[0].Text)
 	}
+	if arts[0].Repository != "https://golang.org/x/mod" {
+		t.Errorf("Repository = %q, want module path URL", arts[0].Repository)
+	}
 
 	if n := httpmock.GetCallCountInfo()["GET "+zipURL]; n != 1 {
 		t.Errorf("proxy called %d times, want 1", n)

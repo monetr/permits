@@ -106,6 +106,33 @@ func TestNormalizeKey(t *testing.T) {
 	}
 }
 
+func TestRepositoryURL(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{map[string]any{"type": "git", "url": "git+https://github.com/lodash/lodash.git"}, "https://github.com/lodash/lodash"},
+		{"git://github.com/jonschlinkert/is-number.git", "https://github.com/jonschlinkert/is-number"},
+		{"git+ssh://git@github.com/acme/proj.git", "https://github.com/acme/proj"},
+		{"git@github.com:acme/proj.git", "https://github.com/acme/proj"},
+		{"github:babel/babel", "https://github.com/babel/babel"},
+		{"gitlab:group/proj", "https://gitlab.com/group/proj"},
+		{"bitbucket:team/proj", "https://bitbucket.org/team/proj"},
+		{"gist:11081aaa281", "https://gist.github.com/11081aaa281"},
+		{"acme/proj", "https://github.com/acme/proj"},
+		{"https://example.org/repo/", "https://example.org/repo"},
+		{map[string]any{"url": ""}, ""},
+		{"not a url", ""},
+		{nil, ""},
+		{42, ""},
+	}
+	for _, c := range cases {
+		if got := repositoryURL(c.in); got != c.want {
+			t.Errorf("repositoryURL(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func makeTarball(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 
@@ -138,7 +165,7 @@ func TestFetcherNodeModulesFirst(t *testing.T) {
 	if err := os.MkdirAll(pnpmPkg, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(pnpmPkg, "package.json"), []byte(`{"version":"7.0.0","license":"MIT"}`), 0o644)
+	os.WriteFile(filepath.Join(pnpmPkg, "package.json"), []byte(`{"version":"7.0.0","license":"MIT","repository":"github:babel/babel"}`), 0o644)
 	os.WriteFile(filepath.Join(pnpmPkg, "LICENSE"), []byte("local babel license"), 0o644)
 
 	// flat layout for an unscoped package.
@@ -171,6 +198,9 @@ func TestFetcherNodeModulesFirst(t *testing.T) {
 	if len(arts) != 1 || arts[0].Source != "npm-node-modules" ||
 		arts[0].Text != "local babel license" || arts[0].DeclaredLicense != "MIT" {
 		t.Fatalf("unexpected @babel/core artifacts: %+v", arts)
+	}
+	if arts[0].Repository != "https://github.com/babel/babel" {
+		t.Errorf("Repository = %q, want shorthand expanded to github URL", arts[0].Repository)
 	}
 
 	lodash := model.Dependency{Ecosystem: model.EcosystemNPM, Name: "lodash", Version: "4.17.21"}
@@ -210,8 +240,9 @@ func TestFetcher(t *testing.T) {
 	httpmock.RegisterResponder("GET", registry+"/lodash", httpmock.NewJsonResponderOrPanic(200, map[string]any{
 		"versions": map[string]any{
 			"4.17.21": map[string]any{
-				"license": "MIT",
-				"dist":    map[string]any{"tarball": tarballURL},
+				"license":    "MIT",
+				"repository": map[string]any{"type": "git", "url": "git+https://github.com/lodash/lodash.git"},
+				"dist":       map[string]any{"tarball": tarballURL},
 			},
 		},
 	}))
@@ -231,6 +262,9 @@ func TestFetcher(t *testing.T) {
 	a := arts[0]
 	if a.FileName != "LICENSE" || a.DeclaredLicense != "MIT" || a.Source != "npm-tarball" {
 		t.Errorf("unexpected artifact: %+v", a)
+	}
+	if a.Repository != "https://github.com/lodash/lodash" {
+		t.Errorf("Repository = %q, want normalized github URL", a.Repository)
 	}
 	if a.Text != "MIT License\n\nverbatim text" {
 		t.Errorf("unexpected text: %q", a.Text)

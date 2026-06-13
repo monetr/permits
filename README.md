@@ -66,11 +66,43 @@ permits \
 | `-node-modules` | lock sibling | node_modules root checked before the registry (repeatable) |
 | `-timeout`      | `30s`        | per-request timeout                                        |
 | `-direct`       | `false`      | only resolve direct (top-level) deps, excluding transitive |
+| `-strip-links`  | `false`      | censor links and neutralize raw HTML in the license text   |
+| `-trust-host`   | —            | host whose links stay live with `-strip-links` (repeatable)|
+| `-strip-html`   | `false`      | with `-strip-links`, delete HTML elements instead          |
 | `-strict`       | `false`      | exit non-zero if any dependency yields no license          |
 | `-v`            | `false`      | verbose progress logging                                   |
 
 Exit codes: `0` on success, `1` if a dependency failed (or `-strict` and
 something had no license), `2` on a usage or I/O error.
+
+### Sanitizing for rendering
+
+`-strip-links` is the one option that edits the stored text. It exists so the
+collected licenses can be published on a site that renders markdown (or MDX)
+to HTML without a package author being able to smuggle in live links, images,
+or markup. The text is rewritten so it renders as plain prose:
+
+- Markdown link syntax is unwrapped and the host censored:
+  `[foo](https://foo.com/x)` becomes `foo (foo[dot]com/x)`. Bare URLs, `www.`
+  hosts, and email addresses are censored the same way, since most renderers
+  auto-link them.
+- Relative links resolve against the package's repository when it's known
+  (npm `repository` metadata, the Go module path), so `[guide](/x)` becomes
+  `guide (github[dot]com/x)`. Without a repository the link collapses to its
+  bare path, just `/x`.
+- Raw HTML/JSX (`<img>`, `<a href>`), MDX expressions (`{...}`), line-leading
+  `import`/`export`, and any link form the rewriter doesn't recognize are
+  escaped so they display as text instead of doing anything. `-strip-html`
+  deletes HTML elements outright instead: tags go away (their inner text
+  stays), comments and script/style blocks vanish entirely. Fenced code blocks
+  are left alone either way.
+- `-trust-host github.com` (repeatable) lets links to hosts you trust through
+  unchanged, subdomains included. Trust is decided by the parsed hostname, so
+  `github.com.evil.com` or `https://github.com@evil.com` don't qualify, and it
+  never applies to images, which render without a click.
+
+SPDX detection still runs on the original text, and the recorded `sha256`
+covers the rewritten text.
 
 ### Output
 

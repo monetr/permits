@@ -54,6 +54,11 @@ type LicenseArtifact struct {
 	// Source records where the bytes came from: "npm-tarball", "go-cache",
 	// "go-proxy", or a custom provider's label.
 	Source string `json:"source"`
+	// Repository is the project URL when the ecosystem exposes one (npm
+	// "repository" metadata, the Go module path). Best-effort; empty when
+	// unknown. It is the base relative links resolve against when link
+	// stripping is enabled.
+	Repository string `json:"repository,omitempty"`
 	// SHA256 is the lowercase hex digest of [LicenseArtifact.Text].
 	SHA256 string `json:"sha256"`
 	// Path is the slash-separated location of the written Markdown file,
@@ -88,6 +93,15 @@ func NewLicenseArtifact(dep Dependency, declared, fileName, source string, raw [
 		Text:            string(raw),
 		RetrievedAt:     time.Now().UTC(),
 	}
+}
+
+// SetText replaces the license text and recomputes the digest, preserving the
+// invariant that [LicenseArtifact.SHA256] always covers [LicenseArtifact.Text].
+// It is meant for post-fetch transforms such as link stripping.
+func (a *LicenseArtifact) SetText(text string) {
+	sum := sha256.Sum256([]byte(text))
+	a.Text = text
+	a.SHA256 = hex.EncodeToString(sum[:])
 }
 
 // Status describes the outcome of processing a single dependency.

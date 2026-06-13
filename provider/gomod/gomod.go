@@ -180,6 +180,13 @@ func resolveProxies(override string) []string {
 	return out
 }
 
+// repoURL derives the project URL from the module path. Module paths are host-rooted import paths
+// (github.com/x/y), and vanity hosts redirect to the real repository, so prefixing a scheme is
+// enough.
+func repoURL(dep model.Dependency) string {
+	return "https://" + dep.Name
+}
+
 // Fetch returns license artifacts, trying the local cache first and the module proxy as a
 // fallback. An empty result with nil error means no license file.
 func (f *Fetcher) Fetch(ctx context.Context, dep model.Dependency) ([]model.LicenseArtifact, error) {
@@ -252,8 +259,9 @@ func (f *Fetcher) fromCache(dep model.Dependency, escPath, escVer string) ([]mod
 			return err
 		}
 
-		artifacts = append(artifacts,
-			model.NewLicenseArtifact(dep, "", filepath.Base(p), "go-cache", data))
+		a := model.NewLicenseArtifact(dep, "", filepath.Base(p), "go-cache", data)
+		a.Repository = repoURL(dep)
+		artifacts = append(artifacts, a)
 
 		return nil
 	})
@@ -303,8 +311,9 @@ func (f *Fetcher) fromProxy(ctx context.Context, dep model.Dependency, escPath, 
 				return nil, err
 			}
 
-			artifacts = append(artifacts,
-				model.NewLicenseArtifact(dep, "", path.Base(zf.Name), "go-proxy", data))
+			a := model.NewLicenseArtifact(dep, "", path.Base(zf.Name), "go-proxy", data)
+			a.Repository = repoURL(dep)
+			artifacts = append(artifacts, a)
 		}
 
 		if artifacts == nil {

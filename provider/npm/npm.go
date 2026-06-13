@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -313,9 +314,10 @@ func (f *Fetcher) Ecosystem() model.Ecosystem { return model.EcosystemNPM }
 
 type registryDoc struct {
 	Versions map[string]struct {
-		License  any `json:"license"`
-		Licenses any `json:"licenses"`
-		Dist     struct {
+		License    any `json:"license"`
+		Licenses   any `json:"licenses"`
+		Repository any `json:"repository"`
+		Dist       struct {
 			Tarball string `json:"tarball"`
 		} `json:"dist"`
 	} `json:"versions"`
@@ -367,8 +369,9 @@ func (f *Fetcher) Fetch(ctx context.Context, dep model.Dependency) ([]model.Lice
 	}
 
 	declared := declaredLicense(v.License, v.Licenses)
+	repo := repositoryURL(v.Repository)
 
-	artifacts, err := extractTarball(tgz, dep, declared)
+	artifacts, err := extractTarball(tgz, dep, declared, repo)
 	if err != nil {
 		return nil, fmt.Errorf("npm tarball %s: %w", id, err)
 	}
@@ -436,7 +439,9 @@ func packageDir(root string, dep model.Dependency) string {
 // readPackageDir reads every license file in dir. Returns a non-nil (possibly empty) slice when dir
 // exists, so a present-but-unlicensed local install is authoritative.
 func (f *Fetcher) readPackageDir(dir string, dep model.Dependency) []model.LicenseArtifact {
-	declared := readPackageJSONLicense(dir)
+	pj, _ := parsePackageJSON(dir)
+	declared := declaredLicense(pj.License, pj.Licenses)
+	repo := repositoryURL(pj.Repository)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -454,17 +459,19 @@ func (f *Fetcher) readPackageDir(dir string, dep model.Dependency) []model.Licen
 			continue
 		}
 
-		artifacts = append(artifacts,
-			model.NewLicenseArtifact(dep, declared, e.Name(), "npm-node-modules", data))
+		a := model.NewLicenseArtifact(dep, declared, e.Name(), "npm-node-modules", data)
+		a.Repository = repo
+		artifacts = append(artifacts, a)
 	}
 
 	return artifacts
 }
 
 type packageJSON struct {
-	Version  string `json:"version"`
-	License  any    `json:"license"`
-	Licenses any    `json:"licenses"`
+	Version    string `json:"version"`
+	License    any    `json:"license"`
+	Licenses   any    `json:"licenses"`
+	Repository any    `json:"repository"`
 }
 
 func parsePackageJSON(dir string) (packageJSON, bool) {
@@ -487,16 +494,7 @@ func readPackageJSONVersion(dir string) string {
 	return pj.Version
 }
 
-func readPackageJSONLicense(dir string) string {
-	pj, ok := parsePackageJSON(dir)
-	if !ok {
-		return ""
-	}
-
-	return declaredLicense(pj.License, pj.Licenses)
-}
-
-func extractTarball(tgz []byte, dep model.Dependency, declared string) ([]model.LicenseArtifact, error) {
+func extractTarball(tgz []byte, dep model.Dependency, declared, repo string) ([]model.LicenseArtifact, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(tgz))
 	if err != nil {
 		return nil, err
@@ -526,11 +524,67 @@ func extractTarball(tgz []byte, dep model.Dependency, declared string) ([]model.
 			return nil, err
 		}
 
-		artifacts = append(artifacts,
-			model.NewLicenseArtifact(dep, declared, path.Base(rel), "npm-tarball", data))
+		a := model.NewLicenseArtifact(dep, declared, path.Base(rel), "npm-tarball", data)
+		a.Repository = repo
+		artifacts = append(artifacts, a)
 	}
 
 	return artifacts, nil
+}
+
+// scpLikeRe matches scp-style git addresses (git@github.com:user/repo); the host must contain a
+// dot so hosting shorthands like "github:user/repo" are not mistaken for one.
+var scpLikeRe = regexp.MustCompile(`^(?:[^@/\s]+@)?([A-Za-z0-9.-]+\.[A-Za-z]{2,}):([\w./-]+)$`)
+
+// repositoryURL normalizes the npm "repository" field (string or {url}) into a plain browsable
+// URL: git/ssh/scp addresses and the npm hosting shorthands (github:user/repo, bare user/repo)
+// all become https. Returns "" when nothing usable is present.
+func repositoryURL(repo any) string {
+	var raw string
+	switch v := repo.(type) {
+	case string:
+		raw = v
+	case map[string]any:
+		raw, _ = v["url"].(string)
+	}
+
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "git+")
+	raw = strings.TrimSuffix(raw, ".git")
+	if raw == "" {
+		return ""
+	}
+
+	if m := scpLikeRe.FindStringSubmatch(raw); m != nil {
+		return "https://" + m[1] + "/" + m[2]
+	}
+
+	for prefix, host := range map[string]string{
+		"github:":    "https://github.com/",
+		"gitlab:":    "https://gitlab.com/",
+		"bitbucket:": "https://bitbucket.org/",
+		"gist:":      "https://gist.github.com/",
+	} {
+		if rest, ok := strings.CutPrefix(raw, prefix); ok {
+			return host + rest
+		}
+	}
+
+	if u, err := url.Parse(raw); err == nil && u.Host != "" {
+		if u.Scheme != "http" && u.Scheme != "https" {
+			u.Scheme = "https"
+		}
+		u.User = nil
+
+		return strings.TrimSuffix(u.String(), "/")
+	}
+
+	// npm shorthand for a GitHub repository: "user/repo".
+	if !strings.ContainsAny(raw, ":@ ") && strings.Count(raw, "/") == 1 && raw[0] != '/' {
+		return "https://github.com/" + raw
+	}
+
+	return ""
 }
 
 // declaredLicense extracts an SPDX-ish string from the npm "license" (string or {type}) or legacy

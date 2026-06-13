@@ -36,6 +36,23 @@ type Options struct {
 	// [provider.DirectScanner]; otherwise [Collector.Collect] returns an
 	// error.
 	DirectOnly bool
+	// StripLinks rewrites the collected license text into a form that stays
+	// inert when rendered as markdown, MDX, or HTML: link syntax is unwrapped,
+	// hosts are defanged ("https://github.com/foo" becomes
+	// "github[dot]com/foo"), and raw HTML/JSX markup is neutralized. Relative
+	// destinations resolve against the dependency's repository URL when known;
+	// with no repository to resolve against, "[foo](/bar)" collapses to its
+	// bare path "/bar". SPDX detection still runs on the verbatim text; SHA256
+	// is recomputed over the rewritten text. See [licenses.StripLinks].
+	StripLinks bool
+	// TrustedHosts are hosts (subdomains included) whose http(s) links survive
+	// StripLinks uncensored, e.g. "github.com". Images are stripped regardless
+	// of host.
+	TrustedHosts []string
+	// StripHTML, together with StripLinks, removes HTML elements from the text
+	// entirely (tags, comments, script/style blocks) instead of escaping them
+	// into visible plain text.
+	StripHTML bool
 	// NpmRegistry overrides the npm registry base URL.
 	NpmRegistry string
 	// NodeModulesDirs are local node_modules roots checked before the npm
@@ -211,6 +228,19 @@ func (c *Collector) fetchOne(ctx context.Context, dep model.Dependency) model.De
 	// consistent.
 	for i := range arts {
 		arts[i].SPDX = licenses.Detect(arts[i].Text)
+	}
+
+	if c.opts.StripLinks {
+		// Copy first: fetchers cache the slices they return, and the cache should keep the
+		// verbatim text so detection above always sees what was actually published.
+		arts = append([]model.LicenseArtifact(nil), arts...)
+		for i := range arts {
+			arts[i].SetText(licenses.StripLinks(arts[i].Text, licenses.StripOptions{
+				Repository:   arts[i].Repository,
+				TrustedHosts: c.opts.TrustedHosts,
+				StripHTML:    c.opts.StripHTML,
+			}))
+		}
 	}
 
 	res.Status = model.StatusResolved

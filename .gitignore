@@ -1,6 +1,9 @@
 /permits
 /dist/
-/licenses/
+# The default -out directory collides with the licenses Go package; ignore
+# generated output there but never source files.
+/licenses/*
+!/licenses/*.go
 example/node_modules/
 example/licenses/
 *.test

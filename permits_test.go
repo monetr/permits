@@ -2,6 +2,8 @@ package permits_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +83,7 @@ func TestCollectorWithCustomEcosystem(t *testing.T) {
 	}
 
 	s := string(md)
-	if !strings.Contains(s, "name: foo") || !strings.Contains(s, "source: fake") {
+	if !strings.Contains(s, `name: "foo"`) || !strings.Contains(s, `source: "fake"`) {
 		t.Errorf("frontmatter missing fields:\n%s", s)
 	}
 
@@ -107,5 +109,61 @@ func TestCollectorWithCustomEcosystem(t *testing.T) {
 	// The relative path must point at the file that was actually written.
 	if !strings.Contains(string(sj), `"path": "fake/foo/1.0.0/LICENSE.md"`) {
 		t.Errorf("summary.json missing relative path:\n%s", sj)
+	}
+}
+
+// linkedProvider serves a license whose text carries links, plus the repository URL relative
+// destinations need.
+type linkedProvider struct{}
+
+func (p *linkedProvider) Ecosystem() model.Ecosystem { return model.Ecosystem("linked") }
+func (p *linkedProvider) Detect(path string) bool    { return strings.HasSuffix(path, ".linked") }
+
+func (p *linkedProvider) Scan(_ context.Context, _ string) ([]model.Dependency, error) {
+	return []model.Dependency{{Ecosystem: "linked", Name: "foo", Version: "1.0.0"}}, nil
+}
+
+func (p *linkedProvider) Fetch(_ context.Context, dep model.Dependency) ([]model.LicenseArtifact, error) {
+	a := model.NewLicenseArtifact(dep, "MIT", "LICENSE.md", "linked",
+		[]byte("See the [guide](/docs/guide.md), [src](https://github.com/acme/foo), or <https://example.com/page>.<br>"))
+	a.Repository = "https://github.com/acme/foo"
+
+	return []model.LicenseArtifact{a}, nil
+}
+
+func TestCollectorStripLinks(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "deps.linked")
+	if err := os.WriteFile(in, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := provider.NewRegistry()
+	lp := &linkedProvider{}
+	reg.Register(lp, lp)
+
+	c := permits.NewCollector(reg, permits.Options{
+		StripLinks:   true,
+		TrustedHosts: []string{"github.com"},
+		StripHTML:    true,
+		Timeout:      time.Second,
+	})
+	_, arts, err := c.Collect(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(arts) != 1 {
+		t.Fatalf("got %d artifacts, want 1", len(arts))
+	}
+
+	want := "See the guide (github[dot]com/docs/guide.md), [src](https://github.com/acme/foo), or example[dot]com/page."
+	if arts[0].Text != want {
+		t.Errorf("Text = %q, want %q", arts[0].Text, want)
+	}
+
+	// The digest invariant must survive the rewrite: SHA256 covers the stored text.
+	sum := sha256.Sum256([]byte(want))
+	if arts[0].SHA256 != hex.EncodeToString(sum[:]) {
+		t.Errorf("SHA256 = %s, not the digest of the rewritten text", arts[0].SHA256)
 	}
 }
