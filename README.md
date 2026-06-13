@@ -69,6 +69,7 @@ permits \
 | `-strip-links`  | `false`      | censor links and neutralize raw HTML in the license text   |
 | `-trust-host`   | —            | host whose links stay live with `-strip-links` (repeatable)|
 | `-strip-html`   | `false`      | with `-strip-links`, delete HTML elements instead          |
+| `-frontmatter`  | —            | extra `key=value` line added to every frontmatter block (repeatable) |
 | `-strict`       | `false`      | exit non-zero if any dependency yields no license          |
 | `-v`            | `false`      | verbose progress logging                                   |
 
@@ -125,23 +126,30 @@ original in-package filename, so dual-licensed or unrecognized files keep their
 `LICENSE.md` or `NOTICE.md`. Repeated names get a `-2`, `-3` suffix, and `.`,
 `..`, or path separators inside a segment become `_`.
 
-Each file is YAML frontmatter followed by the original license text:
+Each file is YAML frontmatter followed by the original license text. Every
+value is a quoted string so a version like `1.0` or the `retrievedAt` timestamp
+is not reinterpreted as a number or date by whatever reads it:
 
 ```
 ---
-name: react
-version: 18.2.0
-ecosystem: npm
+name: "react"
+version: "18.2.0"
+ecosystem: "npm"
 declaredLicense: "MIT"
 spdx: ["MIT"]
 licenseFile: "LICENSE"
-source: npm-tarball
-sha256: <hex>
-retrievedAt: 2026-05-18T00:00:00Z
+source: "npm-tarball"
+sha256: "<hex>"
+retrievedAt: "2026-05-18T00:00:00Z"
 ---
 
 <verbatim license text, emitted exactly as published>
 ```
+
+`-frontmatter key=value` appends your own lines to every block. The value is
+written verbatim, so you pick its YAML type: `-frontmatter search=false` adds
+the boolean `search: false`, while `-frontmatter 'title="my deps"'` keeps the
+quotes and stays a string. Repeat the flag for more than one field.
 
 ## Library
 

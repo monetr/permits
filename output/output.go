@@ -14,8 +14,19 @@ import (
 	"github.com/monetr/permits/model"
 )
 
-// Write renders summary into dir, creating it if necessary.
-func Write(dir string, summary model.Summary) error {
+// FrontmatterField is an extra line injected into every artifact's YAML frontmatter, after the
+// standard fields. The value is written verbatim, so the caller owns its YAML type: a Value of
+// "false" lands as the boolean search: false, while a quoted `"false"` stays a string. This is how
+// callers tag the generated docs for whatever renders them, e.g. a "search: false" that tells a
+// docs site to skip indexing.
+type FrontmatterField struct {
+	Key   string
+	Value string
+}
+
+// Write renders summary into dir, creating it if necessary. Any extra fields are appended to every
+// artifact's frontmatter block in the order given.
+func Write(dir string, summary model.Summary, extra ...FrontmatterField) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -32,7 +43,7 @@ func Write(dir string, summary model.Summary) error {
 		for j := range summary.Dependencies[i].Artifacts {
 			art := &summary.Dependencies[i].Artifacts[j]
 
-			rel, err := writeArtifact(dir, *art, used)
+			rel, err := writeArtifact(dir, *art, used, extra)
 			if err != nil {
 				return err
 			}
@@ -78,7 +89,7 @@ func sortByFolder(deps []model.DepResult) {
 
 // writeArtifact writes one Markdown file and returns its slash-separated path relative to dir (the
 // directory that also holds summary.json).
-func writeArtifact(dir string, a model.LicenseArtifact, used map[string]bool) (string, error) {
+func writeArtifact(dir string, a model.LicenseArtifact, used map[string]bool, extra []FrontmatterField) (string, error) {
 	depDir := filepath.Join(dir, segment(string(a.Ecosystem)), nameToPath(a.Name), segment(a.Version))
 	if err := os.MkdirAll(depDir, 0o755); err != nil {
 		return "", err
@@ -102,6 +113,11 @@ func writeArtifact(dir string, a model.LicenseArtifact, used map[string]bool) (s
 	fmt.Fprintf(&b, "source: %s\n", yamlString(a.Source))
 	fmt.Fprintf(&b, "sha256: %s\n", yamlString(a.SHA256))
 	fmt.Fprintf(&b, "retrievedAt: %s\n", yamlString(a.RetrievedAt.Format("2006-01-02T15:04:05Z07:00")))
+	// Caller-supplied lines go last and pass through verbatim; we do not quote the value here so a
+	// "search: false" stays a boolean rather than turning into the string "false".
+	for _, fm := range extra {
+		fmt.Fprintf(&b, "%s: %s\n", fm.Key, fm.Value)
+	}
 	b.WriteString("---\n\n")
 
 	b.WriteString(a.Text)

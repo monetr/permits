@@ -26,16 +26,44 @@ func (s *stringSlice) Set(v string) error {
 	return nil
 }
 
+// frontmatterFlag is a repeatable -frontmatter key=value that gets appended to every artifact's
+// YAML frontmatter. The value is passed through as written, so "-frontmatter search=false" yields a
+// boolean "search: false" while "-frontmatter 'title=\"My deps\"'" stays a quoted string.
+type frontmatterFlag []output.FrontmatterField
+
+func (f *frontmatterFlag) String() string {
+	parts := make([]string, len(*f))
+	for i, fm := range *f {
+		parts[i] = fm.Key + "=" + fm.Value
+	}
+
+	return strings.Join(parts, ",")
+}
+
+func (f *frontmatterFlag) Set(v string) error {
+	key, value, ok := strings.Cut(v, "=")
+	key = strings.TrimSpace(key)
+	if !ok || key == "" {
+		return fmt.Errorf("must be key=value, got %q", v)
+	}
+
+	*f = append(*f, output.FrontmatterField{Key: key, Value: strings.TrimSpace(value)})
+
+	return nil
+}
+
 func main() {
 	os.Exit(run())
 }
 
 func run() int {
 	var pnpmLocks, goSums, nodeModules, trustHosts stringSlice
+	var frontmatter frontmatterFlag
 	flag.Var(&pnpmLocks, "pnpm-lock", "path to a pnpm-lock.yaml (repeatable)")
 	flag.Var(&goSums, "go-sum", "path to a go.sum (repeatable)")
 	flag.Var(&nodeModules, "node-modules", "node_modules root to check before the npm registry (repeatable); defaults to each pnpm-lock's sibling node_modules")
 	flag.Var(&trustHosts, "trust-host", "with -strip-links, host whose links stay live, subdomains included, e.g. github.com (repeatable)")
+	flag.Var(&frontmatter, "frontmatter", "extra key=value line to add to every output frontmatter block, value written verbatim, e.g. search=false (repeatable)")
 	out := flag.String("out", "./licenses", "output directory")
 	concurrency := flag.Int("concurrency", 8, "parallel fetch workers")
 	goproxy := flag.String("goproxy", "", "override GOPROXY list")
@@ -95,7 +123,7 @@ func run() int {
 		return 2
 	}
 
-	if err := output.Write(*out, summary); err != nil {
+	if err := output.Write(*out, summary, frontmatter...); err != nil {
 		fmt.Fprintf(os.Stderr, "permits: writing output: %v\n", err)
 		return 2
 	}
