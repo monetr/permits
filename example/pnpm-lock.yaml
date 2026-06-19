@@ -9,16 +9,16 @@ importers:
   .:
     dependencies:
       '@monetr/notify':
-        specifier: 1.0.5
-        version: 1.0.5(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+        specifier: 1.0.6
+        version: 1.0.6(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
 
 packages:
 
-  '@monetr/notify@1.0.5':
-    resolution: {integrity: sha512-dnPraD7Y8Ov+zOgJpVJYytlqXCvJbx4h3MpOdQagrCBjg5Z5JKl7ap/llXaIq2BP1baPaQPqABuV9VXj+svHtA==}
+  '@monetr/notify@1.0.6':
+    resolution: {integrity: sha512-AvWVFucBtjex6ntHUKG17tYCbTWYPn1ZAuMYl+4tpd+0DjT4LIt+YnWJVaguFHqEs5o7N46ngbjxApK81hD1Bg==}
     peerDependencies:
-      react: ^18.0 || ^19.0.0
-      react-dom: ^18.0 || ^19.0.0
+      react: ^19.0.0
+      react-dom: ^19.0.0
 
   react-dom@19.2.6:
     resolution: {integrity: sha512-0prMI+hvBbPjsWnxDLxlCGyM8PN6UuWjEUCYmZhO67xIV9Xasa/r/vDnq+Xyq4Lo27g8QSbO5YzARu0D1Sps3g==}
@@ -34,7 +34,7 @@ packages:
 
 snapshots:
 
-  '@monetr/notify@1.0.5(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
+  '@monetr/notify@1.0.6(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
     dependencies:
       react: 19.2.6
       react-dom: 19.2.6(react@19.2.6)
