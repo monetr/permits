@@ -4,6 +4,6 @@
   "private": true,
   "description": "Example project for exercising permits against @monetr/notify.",
   "dependencies": {
-    "@monetr/notify": "1.0.5"
+    "@monetr/notify": "1.0.6"
   }
 }
