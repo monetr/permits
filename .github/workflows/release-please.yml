@@ -28,6 +28,11 @@ jobs:
       # a draft so the jobs below can attach binaries; publish-release then flips
       # it live. GitHub freezes a release and its assets together at publish, so
       # assets cannot be added to an already-published (immutable) release.
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         id: release
         with:
@@ -60,6 +65,11 @@ jobs:
           - { goos: windows, goarch: amd64 }
           - { goos: windows, goarch: arm64 }
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
       - name: Check out the released commit
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -132,6 +142,11 @@ jobs:
       # the release and its assets together (immutable). A SemVer-prerelease tag
       # (e.g. v1.0.0-rc.1) is published as a prerelease and never marked Latest;
       # a final vX.Y.Z is the inverse.
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
       - name: Publish the GitHub Release
         run: |
           set -euo pipefail
