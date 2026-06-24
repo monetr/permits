@@ -9,9 +9,12 @@
   "semanticCommitScope": "Renovate",
   "branchConcurrentLimit": 20,
   "prConcurrentLimit": 20,
+  "schedule": ["before 6am on monday"],
+  "timezone": "America/Chicago",
   "minimumReleaseAge": "7 days",
   "vulnerabilityAlerts": {
-    "minimumReleaseAge": "0 days"
+    "minimumReleaseAge": "0 days",
+    "schedule": ["at any time"]
   },
   "postUpdateOptions": [
     "gomodUpdateImportPaths",
